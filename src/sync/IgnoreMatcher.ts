@@ -24,7 +24,7 @@ function toRegex(pattern: string): RegExp {
     normalized = `${normalized}**`;
   }
 
-  let regex = "^";
+  let regex = "";
   for (let i = 0; i < normalized.length; i += 1) {
     const char = normalized[i];
     if (char === "*") {
@@ -42,9 +42,8 @@ function toRegex(pattern: string): RegExp {
     }
     regex += escapeRegex(char);
   }
-  regex += "$";
 
-  return new RegExp(regex);
+  return new RegExp(`^${regex}(/.*)?$`);
 }
 
 function escapeRegex(value: string): string {

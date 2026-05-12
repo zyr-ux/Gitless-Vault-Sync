@@ -1,5 +1,6 @@
 import { App, PluginSettingTab, Setting } from "obsidian";
 import type VaultSyncPlugin from "./main";
+import { detectDeviceName } from "./main";
 
 export type NoticeLevelSetting = "ALL" | "WARNING" | "ERROR";
 
@@ -93,7 +94,7 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Repository owner")
-      .setDesc("GitHub user or organization name.")
+      .setDesc("GitHub user or organization. Leave blank to auto-detect from your PAT.")
       .addText((text) => {
         text.setPlaceholder("owner");
         text.inputEl.addClass("my-plugin-setting-text");
@@ -147,7 +148,7 @@ export class VaultSyncSettingTab extends PluginSettingTab {
       .setName("Device name")
       .setDesc("Used in commit messages. Leave blank to auto-detect.")
       .addText((text) => {
-        text.setPlaceholder("Desktop");
+        text.setPlaceholder(detectDeviceName());
         text.inputEl.addClass("my-plugin-setting-text");
         text.setValue(this.plugin.settings.deviceName);
         text.onChange(async (value) => {
@@ -156,20 +157,6 @@ export class VaultSyncSettingTab extends PluginSettingTab {
         });
       });
 
-    new Setting(containerEl)
-      .setName("Change debounce (ms)")
-      .setDesc("Delay before uploading edits.")
-      .addText((text) => {
-        text.inputEl.addClass("my-plugin-setting-text2");
-        text.setValue(String(this.plugin.settings.debounceMs));
-        text.onChange(async (value) => {
-          this.plugin.settings.debounceMs = toPositiveInt(
-            value,
-            DEFAULT_SETTINGS.debounceMs
-          );
-          await this.plugin.saveSettings();
-        });
-      });
 
     new Setting(containerEl)
       .setName("Auto-sync interval (sec)")
@@ -186,16 +173,6 @@ export class VaultSyncSettingTab extends PluginSettingTab {
         });
       });
 
-    new Setting(containerEl)
-      .setName("Ignore patterns")
-      .setDesc("One path per line, matched relative to vault root.")
-      .addTextArea((area) => {
-        area.setValue(serializeIgnorePatterns(this.plugin.settings.ignorePatterns));
-        area.onChange(async (value) => {
-          this.plugin.settings.ignorePatterns = parseIgnorePatterns(value);
-          await this.plugin.saveSettings();
-        });
-      });
 
     new Setting(containerEl)
       .setName("Notice level")

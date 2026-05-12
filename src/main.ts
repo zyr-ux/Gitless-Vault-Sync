@@ -212,11 +212,12 @@ export default class VaultSyncPlugin extends Plugin {
         this.showSyncNotice(result, mode);
       }
     } catch (error) {
-      console.error("Vault Sync error", error);
+      console.error("Vault Sync error details:", error);
       if (error instanceof GitHubApiError) {
-        this.showNotice(this.formatGitHubError(error), "ERROR", 10000);
+        this.showNotice(`Sync failed: ${this.formatGitHubError(error)}`, "ERROR", 10000);
       } else {
-        this.showNotice(error, "ERROR", 10000);
+        const msg = error instanceof Error ? error.message : String(error);
+        this.showNotice(`Sync failed: ${msg}`, "ERROR", 10000);
       }
     } finally {
       this.syncInFlight = false;
@@ -229,8 +230,7 @@ export default class VaultSyncPlugin extends Plugin {
   private isConfigured(): boolean {
     return Boolean(
       this.settings.githubToken &&
-        this.settings.repoOwner &&
-        this.settings.repoName
+      this.settings.repoName
     );
   }
 
@@ -330,41 +330,34 @@ export default class VaultSyncPlugin extends Plugin {
     }
 
     if (changes === 0 && result.skipped === 0) {
-      this.showNotice(`Vault Sync: ${mode} complete (no changes).`, "INFO");
+      this.showNotice(`Vault Sync : No changes.`, "INFO");
       return;
     }
 
-    const parts = [
-      `uploaded ${result.uploaded}`,
-      `downloaded ${result.downloaded}`,
-      `deleted local ${result.deletedLocal}`,
-      `deleted remote ${result.deletedRemote}`
-    ];
-
     if (result.skipped > 0) {
-      parts.push(`skipped ${result.skipped}`);
       if (result.skippedFiles.length > 0) {
         console.warn("Vault Sync skipped files:", result.skippedFiles);
       }
+      this.showNotice(
+        `Vault Sync : Sync successful (${result.skipped} files skipped).`,
+        severity
+      );
+    } else {
+      this.showNotice(`Vault Sync : Sync successful.`, severity);
     }
-
-    this.showNotice(
-      `Vault Sync: ${mode} complete (${parts.join(", ")}).`,
-      severity
-    );
   }
 
   private formatGitHubError(error: GitHubApiError): string {
     if (error.retryAfter) {
-      return `GitHub API rate limited. Retry after ${error.retryAfter}s.`;
+      return `Rate limited. Retry after ${error.retryAfter}s.`;
     }
 
     if (error.rateLimitResetAt) {
       const resetAt = new Date(error.rateLimitResetAt);
-      return `GitHub API rate limited. Retry at ${resetAt.toLocaleTimeString()}.`;
+      return `Rate limited. Retry at ${resetAt.toLocaleTimeString()}.`;
     }
 
-    return `GitHub API error (${error.status}): ${error.message}`;
+    return error.message;
   }
 }
 
@@ -381,7 +374,18 @@ function mergeModes(current: SyncMode | null, next: SyncMode): SyncMode {
   return current;
 }
 
-function detectDeviceName(): string {
+export function detectDeviceName(): string {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const os = require("os");
+    const hostname = os.hostname();
+    if (hostname) {
+      return hostname;
+    }
+  } catch (e) {
+    // Ignore and fall back to navigator
+  }
+
   if (typeof navigator === "undefined") {
     return "Device";
   }

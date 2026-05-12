@@ -76,6 +76,7 @@ export class GitHubClient {
   private branch: string;
   private pathPrefix: string;
   private apiBaseUrl: string;
+  private cachedOwner?: string;
 
   constructor(options: GitHubClientOptions) {
     this.token = options.token;
@@ -92,6 +93,7 @@ export class GitHubClient {
     }
     if (options.owner !== undefined) {
       this.owner = options.owner;
+      this.cachedOwner = undefined; // Reset cache if owner changes
     }
     if (options.repo !== undefined) {
       this.repo = options.repo;
@@ -110,7 +112,7 @@ export class GitHubClient {
   async getBranchRef(): Promise<string> {
     const ref = await this.request<{ object: { sha: string } }>(
       "GET",
-      this.buildPath(`/git/ref/heads/${encodeURIComponent(this.branch)}`)
+      await this.buildPath(`/git/ref/heads/${encodeURIComponent(this.branch)}`)
     );
     return ref.object.sha;
   }
@@ -118,7 +120,7 @@ export class GitHubClient {
   async getCommit(sha: string): Promise<GitCommitResponse> {
     return this.request<GitCommitResponse>(
       "GET",
-      this.buildPath(`/git/commits/${sha}`)
+      await this.buildPath(`/git/commits/${sha}`)
     );
   }
 
@@ -126,7 +128,7 @@ export class GitHubClient {
     const query = recursive ? "?recursive=1" : "";
     return this.request<GitTreeResponse>(
       "GET",
-      this.buildPath(`/git/trees/${sha}${query}`)
+      await this.buildPath(`/git/trees/${sha}${query}`)
     );
   }
 
@@ -172,14 +174,14 @@ export class GitHubClient {
   async getBlob(sha: string): Promise<{ content: string; encoding: string }> {
     return this.request<{ content: string; encoding: string }>(
       "GET",
-      this.buildPath(`/git/blobs/${sha}`)
+      await this.buildPath(`/git/blobs/${sha}`)
     );
   }
 
   async createTextBlob(content: string): Promise<string> {
     const response = await this.request<{ sha: string }>(
       "POST",
-      this.buildPath("/git/blobs"),
+      await this.buildPath("/git/blobs"),
       {
         content,
         encoding: "utf-8"
@@ -191,7 +193,7 @@ export class GitHubClient {
   async createBinaryBlob(data: ArrayBuffer): Promise<string> {
     const response = await this.request<{ sha: string }>(
       "POST",
-      this.buildPath("/git/blobs"),
+      await this.buildPath("/git/blobs"),
       {
         content: arrayBufferToBase64(data),
         encoding: "base64"
@@ -217,7 +219,7 @@ export class GitHubClient {
 
     const response = await this.request<{ sha: string }>(
       "POST",
-      this.buildPath("/git/trees"),
+      await this.buildPath("/git/trees"),
       payload
     );
     return response.sha;
@@ -230,7 +232,7 @@ export class GitHubClient {
   ): Promise<string> {
     const response = await this.request<{ sha: string }>(
       "POST",
-      this.buildPath("/git/commits"),
+      await this.buildPath("/git/commits"),
       {
         message,
         tree: treeSha,
@@ -243,7 +245,7 @@ export class GitHubClient {
   async updateBranchRef(newSha: string, force = false): Promise<void> {
     await this.request(
       "PATCH",
-      this.buildPath(`/git/refs/heads/${encodeURIComponent(this.branch)}`),
+      await this.buildPath(`/git/refs/heads/${encodeURIComponent(this.branch)}`),
       {
         sha: newSha,
         force
@@ -254,7 +256,7 @@ export class GitHubClient {
   async createBranchRef(newSha: string): Promise<void> {
     await this.request(
       "POST",
-      this.buildPath("/git/refs"),
+      await this.buildPath("/git/refs"),
       {
         ref: `refs/heads/${this.branch}`,
         sha: newSha
@@ -262,8 +264,32 @@ export class GitHubClient {
     );
   }
 
-  private buildPath(path: string): string {
-    return `${this.apiBaseUrl}/repos/${this.owner}/${this.repo}${path}`;
+  async initializeRepository(): Promise<void> {
+    await this.request(
+      "PUT",
+      await this.buildPath("/contents/.vault-sync-init"),
+      {
+        message: "Initial commit by Vault Sync",
+        content: btoa("Vault Sync initialization file"),
+        branch: this.branch
+      }
+    );
+  }
+
+  private async getOwner(): Promise<string> {
+    if (this.owner) {
+      return this.owner;
+    }
+    if (!this.cachedOwner) {
+      const user = await this.request<{ login: string }>("GET", `${this.apiBaseUrl}/user`);
+      this.cachedOwner = user.login;
+    }
+    return this.cachedOwner;
+  }
+
+  private async buildPath(path: string): Promise<string> {
+    const owner = await this.getOwner();
+    return `${this.apiBaseUrl}/repos/${owner}/${this.repo}${path}`;
   }
 
   private stripPrefix(path: string): string | null {
@@ -300,7 +326,8 @@ export class GitHubClient {
     const response = await fetch(url, {
       method,
       headers,
-      body: body ? JSON.stringify(body) : undefined
+      body: body ? JSON.stringify(body) : undefined,
+      cache: "no-store"
     });
 
     if (!response.ok) {

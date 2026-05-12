@@ -18,7 +18,7 @@ const buildOptions = {
 if (isWatch) {
   const ctx = await esbuild.context(buildOptions);
   await ctx.watch();
-  console.log("Vault Sync: watching for changes...");
+  console.log("Vault Sync : watching for changes...");
 } else {
   await esbuild.build(buildOptions);
 }

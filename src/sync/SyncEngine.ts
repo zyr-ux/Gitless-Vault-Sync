@@ -13,6 +13,7 @@ import {
   type SyncIndexState
 } from "./IndexStore";
 import type { VaultSyncSettings } from "../settings";
+import { detectDeviceName } from "../main";
 
 const MAX_BLOB_BYTES = 100 * 1024 * 1024;
 
@@ -71,13 +72,22 @@ export class SyncEngine {
     allowPush: boolean;
   }): Promise<SyncResult> {
     const now = Date.now();
-    const ignore = new IgnoreMatcher(this.settings.ignorePatterns);
+    // Hardcode critical ignores since the UI is hidden for now
+    const ALWAYS_IGNORE = [
+      ".obsidian/workspace",
+      ".obsidian/workspace.json",
+      ".obsidian/workspace-mobile.json",
+      ".obsidian/cache",
+      ".obsidian/logs",
+      ".trash",
+      ".DS_Store",
+      ".obsidian/plugins/vault-sync/data.json"
+    ];
+    const ignore = new IgnoreMatcher(ALWAYS_IGNORE);
+    
     const index = await this.indexStore.load();
     const localFiles = this.collectLocalFiles(ignore);
-    const snapshot = await this.getRemoteSnapshot();
-    const remoteMap = new Map<string, RemoteFile>(
-      snapshot.files.map((file) => [normalizeVaultPath(file.path), file])
-    );
+    let snapshot = await this.getRemoteSnapshot();
 
     const toDownload = new Map<string, RemoteFile>();
     const toUpload = new Map<string, TFile>();
@@ -85,6 +95,27 @@ export class SyncEngine {
     const toDeleteRemote = new Set<string>();
     let skipped = 0;
     const skippedFiles: string[] = [];
+
+    if (!snapshot.commitSha && options.allowPush) {
+      try {
+        await this.client.initializeRepository();
+        snapshot = await this.getRemoteSnapshot();
+      } catch (e) {
+        console.warn("Failed to initialize empty repository", e);
+      }
+    }
+
+    const initFile = snapshot.files.find((f) => f.path === ".vault-sync-init");
+    if (initFile) {
+      snapshot.files = snapshot.files.filter((f) => f.path !== ".vault-sync-init");
+      if (options.allowPush) {
+        toDeleteRemote.add(".vault-sync-init");
+      }
+    }
+
+    const remoteMap = new Map<string, RemoteFile>(
+      snapshot.files.map((file) => [normalizeVaultPath(file.path), file])
+    );
 
     const queueDownload = (remote: RemoteFile): void => {
       const path = normalizeVaultPath(remote.path);
@@ -296,7 +327,7 @@ export class SyncEngine {
         );
         const parents = snapshot.commitSha ? [snapshot.commitSha] : [];
         const message = `vault-sync: edited by ${
-          this.settings.deviceName || "Device"
+          this.settings.deviceName || detectDeviceName()
         }`;
         const commitSha = await this.client.createCommit(
           message,
@@ -360,7 +391,10 @@ export class SyncEngine {
     try {
       return await this.client.getLatestSnapshot();
     } catch (error) {
-      if (error instanceof GitHubApiError && error.status === 404) {
+      if (
+        error instanceof GitHubApiError &&
+        (error.status === 404 || error.status === 409)
+      ) {
         return { commitSha: "", commitTime: 0, treeSha: "", files: [] };
       }
       throw error;
