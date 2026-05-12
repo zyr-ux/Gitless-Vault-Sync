@@ -1,0 +1,16 @@
+{
+  "name": "vault-sync",
+  "version": "0.1.0",
+  "description": "Obsidian plugin to sync a vault with GitHub via REST API.",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs --watch",
+    "build": "node esbuild.config.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "esbuild": "^0.21.5",
+    "obsidian": "latest",
+    "typescript": "^5.5.4"
+  }
+}
