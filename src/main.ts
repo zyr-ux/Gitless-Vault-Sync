@@ -1,4 +1,4 @@
-import { Platform, Plugin, TFile } from "obsidian";
+import { Notice, Platform, Plugin, TFile } from "obsidian";
 import {
   DEFAULT_SETTINGS,
   VaultSyncSettingTab,
@@ -7,9 +7,10 @@ import {
 import { normalizePluginData } from "./sync/IndexStore";
 import { GitHubClient } from "./github/GitHubClient";
 import { IndexStore } from "./sync/IndexStore";
-import { SyncEngine } from "./sync/SyncEngine";
+import { SyncEngine, type SyncResult } from "./sync/SyncEngine";
 
 type SyncMode = "pull" | "push" | "sync";
+type NoticeSeverity = "INFO" | "WARNING" | "ERROR";
 
 export default class VaultSyncPlugin extends Plugin {
   settings!: VaultSyncSettings;
@@ -20,14 +21,26 @@ export default class VaultSyncPlugin extends Plugin {
   private intervalId: number | null = null;
   private syncInFlight = false;
   private pendingMode: SyncMode | null = null;
+  private pendingNotice = false;
 
   async onload(): Promise<void> {
     await this.loadSettings();
     this.addSettingTab(new VaultSyncSettingTab(this.app, this));
+    this.registerCommands();
+    const ribbonIconEl = this.addRibbonIcon(
+      "github",
+      "Sync with Remote",
+      () => {
+        this.requestSync("sync", true);
+      }
+    );
+    ribbonIconEl.addClass("gh-sync-ribbon");
     this.initializeSync();
     this.registerVaultEvents();
     this.startAutoPull();
-    this.requestSync("pull");
+    if (this.settings.syncOnStart) {
+      this.requestSync("pull");
+    }
   }
 
   onunload(): void {
@@ -157,12 +170,13 @@ export default class VaultSyncPlugin extends Plugin {
     }, this.settings.debounceMs);
   }
 
-  private requestSync(mode: SyncMode): void {
+  private requestSync(mode: SyncMode, showNotice = false): void {
     if (!this.isConfigured() || !this.syncEngine) {
       return;
     }
 
     this.pendingMode = mergeModes(this.pendingMode, mode);
+    this.pendingNotice = this.pendingNotice || showNotice;
     void this.runNextSync();
   }
 
@@ -177,18 +191,26 @@ export default class VaultSyncPlugin extends Plugin {
     }
 
     this.pendingMode = null;
+    const shouldNotify = this.pendingNotice;
+    this.pendingNotice = false;
     this.syncInFlight = true;
 
     try {
+      let result: SyncResult;
       if (mode === "pull") {
-        await this.syncEngine.pull();
+        result = await this.syncEngine.pull();
       } else if (mode === "push") {
-        await this.syncEngine.push();
+        result = await this.syncEngine.push();
       } else {
-        await this.syncEngine.sync();
+        result = await this.syncEngine.sync();
+      }
+
+      if (shouldNotify) {
+        this.showSyncNotice(result, mode);
       }
     } catch (error) {
       console.error("Vault Sync error", error);
+      this.showNotice(error, "ERROR", 10000);
     } finally {
       this.syncInFlight = false;
       if (this.pendingMode) {
@@ -218,6 +240,108 @@ export default class VaultSyncPlugin extends Plugin {
       window.clearInterval(this.intervalId);
       this.intervalId = null;
     }
+  }
+
+  private shouldShowNotice(severity: NoticeSeverity): boolean {
+    switch (this.settings.noticeLevel) {
+      case "ERROR":
+        return severity === "ERROR";
+      case "WARNING":
+        return severity === "WARNING" || severity === "ERROR";
+      case "ALL":
+      default:
+        return true;
+    }
+  }
+
+  private showNotice(
+    message: unknown,
+    severity: NoticeSeverity,
+    timeout?: number
+  ): void {
+    if (!this.shouldShowNotice(severity)) {
+      return;
+    }
+
+    const text = message instanceof Error ? message.message : String(message);
+    new Notice(text, timeout);
+  }
+
+  private registerCommands(): void {
+    this.addCommand({
+      id: "vault-sync-sync-now",
+      name: "Sync now",
+      callback: () => this.requestSync("sync", true)
+    });
+
+    this.addCommand({
+      id: "vault-sync-pull",
+      name: "Pull from GitHub",
+      callback: () => this.requestSync("pull", true)
+    });
+
+    this.addCommand({
+      id: "vault-sync-push",
+      name: "Push to GitHub",
+      callback: () => this.requestSync("push", true)
+    });
+
+    this.addCommand({
+      id: "vault-sync-open-settings",
+      name: "Open Vault Sync settings",
+      callback: () => this.openSettings()
+    });
+  }
+
+  private openSettings(): void {
+    const settings = (
+      this.app as unknown as {
+        setting?: { open: () => void; openTabById: (id: string) => void };
+      }
+    ).setting;
+
+    if (!settings) {
+      return;
+    }
+
+    settings.open();
+    settings.openTabById(this.manifest.id);
+  }
+
+  private showSyncNotice(result: SyncResult, mode: SyncMode): void {
+    const changes =
+      result.uploaded +
+      result.downloaded +
+      result.deletedLocal +
+      result.deletedRemote;
+
+    const severity: NoticeSeverity =
+      result.skipped > 0 ? "WARNING" : "INFO";
+
+    if (severity === "INFO" && !this.settings.showSyncSuccessNotice) {
+      return;
+    }
+
+    if (changes === 0 && result.skipped === 0) {
+      this.showNotice(`Vault Sync: ${mode} complete (no changes).`, "INFO");
+      return;
+    }
+
+    const parts = [
+      `uploaded ${result.uploaded}`,
+      `downloaded ${result.downloaded}`,
+      `deleted local ${result.deletedLocal}`,
+      `deleted remote ${result.deletedRemote}`
+    ];
+
+    if (result.skipped > 0) {
+      parts.push(`skipped ${result.skipped}`);
+    }
+
+    this.showNotice(
+      `Vault Sync: ${mode} complete (${parts.join(", ")}).`,
+      severity
+    );
   }
 }
 
