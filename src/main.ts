@@ -6,7 +6,7 @@ import {
 } from "./settings";
 
 export default class VaultSyncPlugin extends Plugin {
-  settings: VaultSyncSettings;
+  settings!: VaultSyncSettings;
 
   async onload(): Promise<void> {
     await this.loadSettings();
