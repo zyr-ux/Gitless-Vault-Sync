@@ -31,6 +31,7 @@ export const DEFAULT_SETTINGS: VaultSyncSettings = {
     ".obsidian/workspace",
     ".obsidian/workspace.json",
     ".obsidian/cache",
+    ".obsidian/logs",
     ".obsidian/plugins",
     ".trash",
     ".DS_Store"

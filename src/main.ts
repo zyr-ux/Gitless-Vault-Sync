@@ -5,7 +5,7 @@ import {
   type VaultSyncSettings
 } from "./settings";
 import { normalizePluginData } from "./sync/IndexStore";
-import { GitHubClient } from "./github/GitHubClient";
+import { GitHubApiError, GitHubClient } from "./github/GitHubClient";
 import { IndexStore } from "./sync/IndexStore";
 import { SyncEngine, type SyncResult } from "./sync/SyncEngine";
 
@@ -172,6 +172,9 @@ export default class VaultSyncPlugin extends Plugin {
 
   private requestSync(mode: SyncMode, showNotice = false): void {
     if (!this.isConfigured() || !this.syncEngine) {
+      if (showNotice) {
+        this.showNotice("Vault Sync is not configured.", "WARNING");
+      }
       return;
     }
 
@@ -210,7 +213,11 @@ export default class VaultSyncPlugin extends Plugin {
       }
     } catch (error) {
       console.error("Vault Sync error", error);
-      this.showNotice(error, "ERROR", 10000);
+      if (error instanceof GitHubApiError) {
+        this.showNotice(this.formatGitHubError(error), "ERROR", 10000);
+      } else {
+        this.showNotice(error, "ERROR", 10000);
+      }
     } finally {
       this.syncInFlight = false;
       if (this.pendingMode) {
@@ -336,12 +343,28 @@ export default class VaultSyncPlugin extends Plugin {
 
     if (result.skipped > 0) {
       parts.push(`skipped ${result.skipped}`);
+      if (result.skippedFiles.length > 0) {
+        console.warn("Vault Sync skipped files:", result.skippedFiles);
+      }
     }
 
     this.showNotice(
       `Vault Sync: ${mode} complete (${parts.join(", ")}).`,
       severity
     );
+  }
+
+  private formatGitHubError(error: GitHubApiError): string {
+    if (error.retryAfter) {
+      return `GitHub API rate limited. Retry after ${error.retryAfter}s.`;
+    }
+
+    if (error.rateLimitResetAt) {
+      const resetAt = new Date(error.rateLimitResetAt);
+      return `GitHub API rate limited. Retry at ${resetAt.toLocaleTimeString()}.`;
+    }
+
+    return `GitHub API error (${error.status}): ${error.message}`;
   }
 }
 

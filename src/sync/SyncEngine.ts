@@ -22,6 +22,7 @@ export interface SyncResult {
   deletedLocal: number;
   deletedRemote: number;
   skipped: number;
+  skippedFiles: string[];
 }
 
 interface RemoteSnapshot {
@@ -83,6 +84,7 @@ export class SyncEngine {
     const toDeleteLocal = new Set<string>();
     const toDeleteRemote = new Set<string>();
     let skipped = 0;
+    const skippedFiles: string[] = [];
 
     const queueDownload = (remote: RemoteFile): void => {
       const path = normalizeVaultPath(remote.path);
@@ -219,6 +221,11 @@ export class SyncEngine {
       }
 
       for (const remote of toDownload.values()) {
+        if (remote.size > MAX_BLOB_BYTES) {
+          skipped += 1;
+          skippedFiles.push(remote.path);
+          continue;
+        }
         const file = await this.writeRemoteFile(remote);
         if (!file) {
           skipped += 1;
@@ -253,7 +260,7 @@ export class SyncEngine {
 
       for (const file of toUpload.values()) {
         const filePath = normalizeVaultPath(file.path);
-        const blobData = await this.readFileBinary(file);
+        const blobData = await this.readFileBinary(file, skippedFiles);
         if (!blobData) {
           skipped += 1;
           continue;
@@ -329,7 +336,8 @@ export class SyncEngine {
       downloaded,
       deletedLocal,
       deletedRemote,
-      skipped
+      skipped,
+      skippedFiles
     };
   }
 
@@ -382,8 +390,12 @@ export class SyncEngine {
     return this.app.vault.create(path, blob.content);
   }
 
-  private async readFileBinary(file: TFile): Promise<ArrayBuffer | null> {
+  private async readFileBinary(
+    file: TFile,
+    skippedFiles: string[]
+  ): Promise<ArrayBuffer | null> {
     if (file.stat.size > MAX_BLOB_BYTES) {
+      skippedFiles.push(file.path);
       return null;
     }
 
