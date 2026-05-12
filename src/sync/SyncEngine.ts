@@ -1,0 +1,424 @@
+import { App, TFile } from "obsidian";
+import {
+  GitHubApiError,
+  type GitHubClient,
+  type RemoteFile
+} from "../github/GitHubClient";
+import { IgnoreMatcher } from "./IgnoreMatcher";
+import {
+  IndexStore,
+  ensureEntry,
+  removeEntry,
+  type SyncIndexEntry,
+  type SyncIndexState
+} from "./IndexStore";
+import type { VaultSyncSettings } from "../settings";
+
+const MAX_BLOB_BYTES = 100 * 1024 * 1024;
+
+export interface SyncResult {
+  uploaded: number;
+  downloaded: number;
+  deletedLocal: number;
+  deletedRemote: number;
+  skipped: number;
+}
+
+interface RemoteSnapshot {
+  commitSha: string;
+  commitTime: number;
+  treeSha: string;
+  files: RemoteFile[];
+}
+
+export class SyncEngine {
+  private app: App;
+  private client: GitHubClient;
+  private indexStore: IndexStore;
+  private settings: VaultSyncSettings;
+
+  constructor(
+    app: App,
+    client: GitHubClient,
+    indexStore: IndexStore,
+    settings: VaultSyncSettings
+  ) {
+    this.app = app;
+    this.client = client;
+    this.indexStore = indexStore;
+    this.settings = settings;
+  }
+
+  updateSettings(settings: VaultSyncSettings): void {
+    this.settings = settings;
+  }
+
+  async sync(): Promise<SyncResult> {
+    return this.runSync({ allowPull: true, allowPush: true });
+  }
+
+  async pull(): Promise<SyncResult> {
+    return this.runSync({ allowPull: true, allowPush: false });
+  }
+
+  async push(): Promise<SyncResult> {
+    return this.runSync({ allowPull: false, allowPush: true });
+  }
+
+  private async runSync(options: {
+    allowPull: boolean;
+    allowPush: boolean;
+  }): Promise<SyncResult> {
+    const now = Date.now();
+    const ignore = new IgnoreMatcher(this.settings.ignorePatterns);
+    const index = await this.indexStore.load();
+    const localFiles = this.collectLocalFiles(ignore);
+    const snapshot = await this.getRemoteSnapshot();
+    const remoteMap = new Map<string, RemoteFile>(
+      snapshot.files.map((file) => [normalizeVaultPath(file.path), file])
+    );
+
+    const toDownload = new Map<string, RemoteFile>();
+    const toUpload = new Map<string, TFile>();
+    const toDeleteLocal = new Set<string>();
+    const toDeleteRemote = new Set<string>();
+    let skipped = 0;
+
+    const queueDownload = (remote: RemoteFile): void => {
+      const path = normalizeVaultPath(remote.path);
+      toUpload.delete(path);
+      toDeleteRemote.delete(path);
+      if (options.allowPull) {
+        toDownload.set(path, remote);
+      }
+    };
+
+    const queueUpload = (file: TFile): void => {
+      const path = normalizeVaultPath(file.path);
+      toDownload.delete(path);
+      toDeleteLocal.delete(path);
+      if (options.allowPush) {
+        toUpload.set(path, file);
+      }
+    };
+
+    const queueDeleteRemote = (path: string): void => {
+      const normalized = normalizeVaultPath(path);
+      toDownload.delete(normalized);
+      toUpload.delete(normalized);
+      if (options.allowPush) {
+        toDeleteRemote.add(normalized);
+      }
+    };
+
+    const queueDeleteLocal = (path: string): void => {
+      const normalized = normalizeVaultPath(path);
+      toUpload.delete(normalized);
+      if (options.allowPull) {
+        toDeleteLocal.add(normalized);
+      }
+    };
+
+    for (const [path, entry] of Object.entries(index.entries)) {
+      if (ignore.ignores(path)) {
+        continue;
+      }
+
+      const remote = remoteMap.get(path);
+      const local = localFiles.get(path) ?? null;
+
+      if (!remote) {
+        if (options.allowPull) {
+          if (local) {
+            queueDeleteLocal(path);
+          }
+          removeEntry(index, path);
+        }
+        continue;
+      }
+
+      if (!local) {
+        if (options.allowPull && !options.allowPush) {
+          entry.deletedLocally = false;
+          entry.localDeletedAt = undefined;
+          queueDownload(remote);
+          continue;
+        }
+
+        entry.deletedLocally = true;
+        entry.localDeletedAt = entry.localDeletedAt ?? now;
+
+        const remoteChanged = entry.remoteSha !== remote.sha;
+        const deleteTime = entry.localDeletedAt ?? now;
+
+        if (remoteChanged && snapshot.commitTime > deleteTime) {
+          entry.deletedLocally = false;
+          entry.localDeletedAt = undefined;
+          queueDownload(remote);
+        } else {
+          queueDeleteRemote(path);
+        }
+        continue;
+      }
+
+      const localChanged = local.stat.mtime > entry.localMtime;
+      const remoteChanged = entry.remoteSha !== remote.sha;
+
+      if (remoteChanged && localChanged) {
+        if (local.stat.mtime >= snapshot.commitTime) {
+          queueUpload(local);
+        } else {
+          queueDownload(remote);
+        }
+      } else if (remoteChanged) {
+        queueDownload(remote);
+      } else if (localChanged) {
+        queueUpload(local);
+      }
+    }
+
+    for (const [path, remote] of remoteMap.entries()) {
+      if (ignore.ignores(path)) {
+        continue;
+      }
+
+      const entry = index.entries[path];
+      const local = localFiles.get(path) ?? null;
+
+      if (!entry) {
+        if (!local) {
+          queueDownload(remote);
+        } else if (local.stat.mtime >= snapshot.commitTime) {
+          queueUpload(local);
+        } else {
+          queueDownload(remote);
+        }
+      }
+    }
+
+    for (const [path, local] of localFiles.entries()) {
+      if (ignore.ignores(path)) {
+        continue;
+      }
+
+      if (!index.entries[path] && !remoteMap.has(path)) {
+        queueUpload(local);
+      }
+    }
+
+    let downloaded = 0;
+    let deletedLocal = 0;
+    if (options.allowPull) {
+      for (const path of toDeleteLocal) {
+        const target = this.app.vault.getAbstractFileByPath(path);
+        if (target instanceof TFile) {
+          await this.app.vault.delete(target);
+          deletedLocal += 1;
+        }
+        removeEntry(index, path);
+      }
+
+      for (const remote of toDownload.values()) {
+        const file = await this.writeRemoteFile(remote);
+        if (!file) {
+          skipped += 1;
+          continue;
+        }
+
+        const entry = ensureEntry(index, normalizeVaultPath(remote.path));
+        entry.remoteSha = remote.sha;
+        entry.lastRemoteCommitTime = snapshot.commitTime;
+        entry.lastSynced = now;
+        entry.localMtime = file.stat.mtime;
+        entry.deletedLocally = false;
+        entry.localDeletedAt = undefined;
+        downloaded += 1;
+      }
+    }
+
+    let uploaded = 0;
+    let deletedRemote = 0;
+    if (options.allowPush) {
+      const treeEntries: Array<{
+        path: string;
+        mode: string;
+        type: "blob";
+        sha: string | null;
+      }> = [];
+      const pendingIndexUpdates: Array<{
+        path: string;
+        localMtime: number;
+        blobSha: string;
+      }> = [];
+
+      for (const file of toUpload.values()) {
+        const filePath = normalizeVaultPath(file.path);
+        const blobData = await this.readFileBinary(file);
+        if (!blobData) {
+          skipped += 1;
+          continue;
+        }
+
+        const blobSha = await this.client.createBinaryBlob(blobData);
+        treeEntries.push({
+          path: filePath,
+          mode: "100644",
+          type: "blob",
+          sha: blobSha
+        });
+        pendingIndexUpdates.push({
+          path: filePath,
+          localMtime: file.stat.mtime,
+          blobSha
+        });
+      }
+
+      for (const path of toDeleteRemote.values()) {
+        treeEntries.push({
+          path,
+          mode: "100644",
+          type: "blob",
+          sha: null
+        });
+      }
+
+      if (treeEntries.length > 0) {
+        const treeSha = await this.client.createTree(
+          snapshot.treeSha || undefined,
+          treeEntries
+        );
+        const parents = snapshot.commitSha ? [snapshot.commitSha] : [];
+        const message = `vault-sync: edited by ${
+          this.settings.deviceName || "Device"
+        }`;
+        const commitSha = await this.client.createCommit(
+          message,
+          treeSha,
+          parents
+        );
+
+        if (snapshot.commitSha) {
+          await this.client.updateBranchRef(commitSha);
+        } else {
+          await this.client.createBranchRef(commitSha);
+        }
+
+        const commitTime = Date.now();
+        for (const update of pendingIndexUpdates) {
+          const entry = ensureEntry(index, update.path);
+          entry.remoteSha = update.blobSha;
+          entry.localMtime = update.localMtime;
+          entry.lastRemoteCommitTime = commitTime;
+          entry.lastSynced = commitTime;
+          entry.deletedLocally = false;
+          entry.localDeletedAt = undefined;
+          uploaded += 1;
+        }
+
+        for (const path of toDeleteRemote) {
+          removeEntry(index, path);
+          deletedRemote += 1;
+        }
+      }
+    }
+
+    await this.indexStore.save(index);
+
+    return {
+      uploaded,
+      downloaded,
+      deletedLocal,
+      deletedRemote,
+      skipped
+    };
+  }
+
+  private collectLocalFiles(ignore: IgnoreMatcher): Map<string, TFile> {
+    const files = this.app.vault.getFiles();
+    const map = new Map<string, TFile>();
+
+    for (const file of files) {
+      const path = normalizeVaultPath(file.path);
+      if (ignore.ignores(path)) {
+        continue;
+      }
+      map.set(path, file);
+    }
+
+    return map;
+  }
+
+  private async getRemoteSnapshot(): Promise<RemoteSnapshot> {
+    try {
+      return await this.client.getLatestSnapshot();
+    } catch (error) {
+      if (error instanceof GitHubApiError && error.status === 404) {
+        return { commitSha: "", commitTime: 0, treeSha: "", files: [] };
+      }
+      throw error;
+    }
+  }
+
+  private async writeRemoteFile(remote: RemoteFile): Promise<TFile | null> {
+    const blob = await this.client.getBlob(remote.sha);
+    const path = normalizeVaultPath(remote.path);
+
+    await this.ensureParentFolder(path);
+
+    const existing = this.app.vault.getAbstractFileByPath(path);
+    if (blob.encoding === "base64") {
+      const data = base64ToArrayBuffer(blob.content);
+      if (existing instanceof TFile) {
+        await this.app.vault.modifyBinary(existing, data);
+        return existing;
+      }
+      return this.app.vault.createBinary(path, data);
+    }
+
+    if (existing instanceof TFile) {
+      await this.app.vault.modify(existing, blob.content);
+      return existing;
+    }
+    return this.app.vault.create(path, blob.content);
+  }
+
+  private async readFileBinary(file: TFile): Promise<ArrayBuffer | null> {
+    if (file.stat.size > MAX_BLOB_BYTES) {
+      return null;
+    }
+
+    return this.app.vault.readBinary(file);
+  }
+
+  private async ensureParentFolder(path: string): Promise<void> {
+    const lastSlash = path.lastIndexOf("/");
+    if (lastSlash <= 0) {
+      return;
+    }
+
+    const parent = path.slice(0, lastSlash);
+    const parts = parent.split("/");
+    let current = "";
+
+    for (const part of parts) {
+      current = current ? `${current}/${part}` : part;
+      const existing = this.app.vault.getAbstractFileByPath(current);
+      if (!existing) {
+        await this.app.vault.createFolder(current);
+      }
+    }
+  }
+}
+
+function normalizeVaultPath(path: string): string {
+  return path.replace(/\\/g, "/").replace(/^\//, "");
+}
+
+function base64ToArrayBuffer(base64: string): ArrayBuffer {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes.buffer;
+}

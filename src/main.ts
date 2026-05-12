@@ -4,6 +4,7 @@ import {
   VaultSyncSettingTab,
   type VaultSyncSettings
 } from "./settings";
+import { normalizePluginData } from "./sync/IndexStore";
 
 export default class VaultSyncPlugin extends Plugin {
   settings!: VaultSyncSettings;
@@ -14,8 +15,8 @@ export default class VaultSyncPlugin extends Plugin {
   }
 
   async loadSettings(): Promise<void> {
-    const stored = (await this.loadData()) as Partial<VaultSyncSettings> | null;
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, stored ?? {});
+    const data = normalizePluginData(await this.loadData(), DEFAULT_SETTINGS);
+    this.settings = data.settings;
 
     if (!Array.isArray(this.settings.ignorePatterns)) {
       this.settings.ignorePatterns = DEFAULT_SETTINGS.ignorePatterns.slice();
@@ -28,7 +29,9 @@ export default class VaultSyncPlugin extends Plugin {
   }
 
   async saveSettings(): Promise<void> {
-    await this.saveData(this.settings);
+    const data = normalizePluginData(await this.loadData(), DEFAULT_SETTINGS);
+    data.settings = this.settings;
+    await this.saveData(data);
   }
 }
 

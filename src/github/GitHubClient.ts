@@ -19,6 +19,8 @@ export interface GitCommitResponse {
   sha: string;
   tree: { sha: string; url: string };
   parents: Array<{ sha: string; url: string }>;
+  committer?: { date: string };
+  author?: { date: string };
 }
 
 export interface GitHubClientOptions {
@@ -128,22 +130,43 @@ export class GitHubClient {
     );
   }
 
-  async getLatestTree(): Promise<{ commitSha: string; tree: GitTreeResponse }> {
+  async getLatestTree(): Promise<{
+    commitSha: string;
+    tree: GitTreeResponse;
+    commitTime: number;
+  }> {
     const commitSha = await this.getBranchRef();
     const commit = await this.getCommit(commitSha);
     const tree = await this.getTree(commit.tree.sha, true);
-    return { commitSha, tree };
+    return { commitSha, tree, commitTime: parseCommitTime(commit) };
   }
 
-  async listRemoteFiles(): Promise<RemoteFile[]> {
-    const { tree } = await this.getLatestTree();
-    return tree.tree
+  async getLatestSnapshot(): Promise<{
+    commitSha: string;
+    commitTime: number;
+    treeSha: string;
+    files: RemoteFile[];
+  }> {
+    const latest = await this.getLatestTree();
+    const files = latest.tree.tree
       .filter((item) => item.type === "blob")
       .map((item) => {
         const path = this.stripPrefix(item.path);
         return path ? { path, sha: item.sha, size: item.size ?? 0 } : null;
       })
       .filter((item): item is RemoteFile => item !== null);
+
+    return {
+      commitSha: latest.commitSha,
+      commitTime: latest.commitTime,
+      treeSha: latest.tree.sha,
+      files
+    };
+  }
+
+  async listRemoteFiles(): Promise<RemoteFile[]> {
+    const snapshot = await this.getLatestSnapshot();
+    return snapshot.files;
   }
 
   async getBlob(sha: string): Promise<{ content: string; encoding: string }> {
@@ -178,19 +201,24 @@ export class GitHubClient {
   }
 
   async createTree(
-    baseTreeSha: string,
+    baseTreeSha: string | undefined,
     entries: GitCreateTreeEntry[]
   ): Promise<string> {
+    const payload: Record<string, unknown> = {
+      tree: entries.map((entry) => ({
+        ...entry,
+        path: this.addPrefix(normalizeVaultPath(entry.path))
+      }))
+    };
+
+    if (baseTreeSha) {
+      payload.base_tree = baseTreeSha;
+    }
+
     const response = await this.request<{ sha: string }>(
       "POST",
       this.buildPath("/git/trees"),
-      {
-        base_tree: baseTreeSha,
-        tree: entries.map((entry) => ({
-          ...entry,
-          path: this.addPrefix(normalizeVaultPath(entry.path))
-        }))
-      }
+      payload
     );
     return response.sha;
   }
@@ -219,6 +247,17 @@ export class GitHubClient {
       {
         sha: newSha,
         force
+      }
+    );
+  }
+
+  async createBranchRef(newSha: string): Promise<void> {
+    await this.request(
+      "POST",
+      this.buildPath("/git/refs"),
+      {
+        ref: `refs/heads/${this.branch}`,
+        sha: newSha
       }
     );
   }
@@ -319,6 +358,12 @@ function normalizePathPrefix(prefix: string): string {
 
 function normalizeVaultPath(path: string): string {
   return path.replace(/\\/g, "/").replace(/^\//, "");
+}
+
+function parseCommitTime(commit: GitCommitResponse): number {
+  const dateValue = commit.committer?.date ?? commit.author?.date;
+  const parsed = dateValue ? Date.parse(dateValue) : NaN;
+  return Number.isFinite(parsed) ? parsed : Date.now();
 }
 
 function arrayBufferToBase64(data: ArrayBuffer): string {
