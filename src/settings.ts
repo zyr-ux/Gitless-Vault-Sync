@@ -54,29 +54,8 @@ export class VaultSyncSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
 
-    containerEl.createEl("h2", { text: "Vault Sync" });
+    containerEl.createEl("h2", { text: "Vault Sync Settings" });
 
-    const howto = containerEl.createEl("div", { cls: "howto" });
-    howto.createEl("div", {
-      text: "How to use this plugin",
-      cls: "howto_title"
-    });
-    howto.createEl("small", {
-      text:
-        "Enter your GitHub repo owner/name and a personal access token with repo scope. Vault Sync uses GitHub's REST API and does not require git.",
-      cls: "howto_text"
-    });
-    howto.createEl("br");
-    const linkEl = howto.createEl("p");
-    linkEl.createEl("span", { text: "See the " });
-    linkEl.createEl("a", {
-      href:
-        "https://github.com/kevinmkchin/Obsidian-GitHub-Sync/blob/main/README.md",
-      text: "README"
-    });
-    linkEl.createEl("span", {
-      text: " for a UI reference and setup walkthrough."
-    });
 
     new Setting(containerEl)
       .setName("GitHub token")
@@ -107,7 +86,7 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Repository name")
-      .setDesc("Repository name without the owner.")
+      .setDesc("Name of your remote repository.")
       .addText((text) => {
         text.setPlaceholder("vault");
         text.inputEl.addClass("my-plugin-setting-text");
@@ -214,6 +193,14 @@ export class VaultSyncSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           })
       );
+
+    const footer = containerEl.createEl("p", { cls: "vault-sync-footer" });
+    footer.createEl("span", { text: "To know how to set up, visit the " });
+    footer.createEl("a", {
+      href: "https://github.com/kevinmkchin/Obsidian-GitHub-Sync/blob/main/README.md",
+      text: "README"
+    });
+    footer.createEl("span", { text: "." });
   }
 }
 
