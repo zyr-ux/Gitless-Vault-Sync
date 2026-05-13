@@ -108,5 +108,5 @@ jobs:
 
             > If you are updating from a previous version, replace the existing `vault-sync` folder contents and reload Obsidian.
           files: Vault-Sync-${{ steps.version.outputs.tag }}.zip
-          draft: false
+          draft: true
           prerelease: false
