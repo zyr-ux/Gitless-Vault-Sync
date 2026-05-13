@@ -138,8 +138,8 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 
 
     new Setting(containerEl)
-      .setName("Auto-sync interval (sec)")
-      .setDesc("Mobile auto-pull interval. Set to 0 to disable.")
+      .setName("Auto-pull interval (sec)")
+      .setDesc("Automatically pull from remote on this interval. Set to 0 to disable.")
       .addText((text) => {
         text.inputEl.addClass("my-plugin-setting-text2");
         text.setValue(String(this.plugin.settings.syncIntervalSec));

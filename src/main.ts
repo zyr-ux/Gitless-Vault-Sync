@@ -150,7 +150,6 @@ export default class VaultSyncPlugin extends Plugin {
   private shouldAutoPull(): boolean {
     return (
       this.settings.syncIntervalSec > 0 &&
-      Platform.isMobileApp &&
       this.isConfigured()
     );
   }
