@@ -107,7 +107,11 @@ export class SyncEngine {
       ".DS_Store",
       ".obsidian/plugins/vault-sync/data.json"
     ];
-    const ignore = new IgnoreMatcher(ALWAYS_IGNORE);
+    const ignorePatterns = [
+      ...ALWAYS_IGNORE,
+      ...(this.settings.ignorePatterns ?? [])
+    ];
+    const ignore = new IgnoreMatcher(ignorePatterns);
 
     const baseIndex = await this.indexStore.load();
     const localFiles = this.collectLocalFiles(ignore);
