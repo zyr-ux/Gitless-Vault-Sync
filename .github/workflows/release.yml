@@ -98,15 +98,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
-          name: "Vault Sync ${{ steps.version.outputs.tag }}"
-          body: |
-            ## Installation
-
-            1. Download `Vault-Sync-${{ steps.version.outputs.tag }}.zip` below
-            2. Extract the `vault-sync` folder into your vault's `.obsidian/plugins/` directory
-            3. Reload Obsidian and enable **Vault Sync** under Settings → Community Plugins
-
-            > If you are updating from a previous version, replace the existing `vault-sync` folder contents and reload Obsidian.
+          name: ${{ steps.version.outputs.tag }}
+          generate_release_notes: true
           files: Vault-Sync-${{ steps.version.outputs.tag }}.zip
           draft: true
           prerelease: false
