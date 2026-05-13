@@ -19,6 +19,7 @@ export default class VaultSyncPlugin extends Plugin {
   private indexStore?: IndexStore;
   private debounceTimer: number | null = null;
   private intervalId: number | null = null;
+  private settingsSaveTimer: number | null = null;
   private syncInFlight = false;
   private pendingMode: SyncMode | null = null;
   private pendingNotice = false;
@@ -66,6 +67,17 @@ export default class VaultSyncPlugin extends Plugin {
     data.settings = this.settings;
     await this.saveData(data);
     this.applySettings();
+  }
+
+  queueSaveSettings(): void {
+    if (this.settingsSaveTimer) {
+      window.clearTimeout(this.settingsSaveTimer);
+    }
+
+    this.settingsSaveTimer = window.setTimeout(() => {
+      this.settingsSaveTimer = null;
+      void this.saveSettings();
+    }, 400);
   }
 
   private initializeSync(): void {
@@ -238,6 +250,10 @@ export default class VaultSyncPlugin extends Plugin {
     if (this.debounceTimer) {
       window.clearTimeout(this.debounceTimer);
       this.debounceTimer = null;
+    }
+    if (this.settingsSaveTimer) {
+      window.clearTimeout(this.settingsSaveTimer);
+      this.settingsSaveTimer = null;
     }
     this.clearInterval();
   }

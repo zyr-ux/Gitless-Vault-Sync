@@ -67,7 +67,7 @@ export class VaultSyncSettingTab extends PluginSettingTab {
         text.setValue(this.plugin.settings.githubToken);
         text.onChange(async (value) => {
           this.plugin.settings.githubToken = value.trim();
-          await this.plugin.saveSettings();
+          this.plugin.queueSaveSettings();
         });
       });
 
@@ -80,7 +80,7 @@ export class VaultSyncSettingTab extends PluginSettingTab {
         text.setValue(this.plugin.settings.repoOwner);
         text.onChange(async (value) => {
           this.plugin.settings.repoOwner = value.trim();
-          await this.plugin.saveSettings();
+          this.plugin.queueSaveSettings();
         });
       });
 
@@ -93,7 +93,7 @@ export class VaultSyncSettingTab extends PluginSettingTab {
         text.setValue(this.plugin.settings.repoName);
         text.onChange(async (value) => {
           this.plugin.settings.repoName = value.trim();
-          await this.plugin.saveSettings();
+          this.plugin.queueSaveSettings();
         });
       });
 
@@ -106,7 +106,7 @@ export class VaultSyncSettingTab extends PluginSettingTab {
         text.setValue(this.plugin.settings.branch);
         text.onChange(async (value) => {
           this.plugin.settings.branch = value.trim() || "main";
-          await this.plugin.saveSettings();
+          this.plugin.queueSaveSettings();
         });
       });
 
@@ -119,7 +119,7 @@ export class VaultSyncSettingTab extends PluginSettingTab {
         text.setValue(this.plugin.settings.repoPathPrefix);
         text.onChange(async (value) => {
           this.plugin.settings.repoPathPrefix = value.trim();
-          await this.plugin.saveSettings();
+          this.plugin.queueSaveSettings();
         });
       });
 
@@ -132,7 +132,7 @@ export class VaultSyncSettingTab extends PluginSettingTab {
         text.setValue(this.plugin.settings.deviceName);
         text.onChange(async (value) => {
           this.plugin.settings.deviceName = value.trim();
-          await this.plugin.saveSettings();
+          this.plugin.queueSaveSettings();
         });
       });
 
@@ -148,7 +148,7 @@ export class VaultSyncSettingTab extends PluginSettingTab {
             value,
             DEFAULT_SETTINGS.syncIntervalSec
           );
-          await this.plugin.saveSettings();
+          this.plugin.queueSaveSettings();
         });
       });
 
