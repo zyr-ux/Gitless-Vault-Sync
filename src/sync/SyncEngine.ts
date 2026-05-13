@@ -16,6 +16,7 @@ import type { VaultSyncSettings } from "../settings";
 import { detectDeviceName } from "../main";
 
 const MAX_BLOB_BYTES = 100 * 1024 * 1024;
+const MAX_PUSH_RETRIES = 2;
 
 export interface SyncResult {
   uploaded: number;
@@ -31,6 +32,29 @@ interface RemoteSnapshot {
   commitTime: number;
   treeSha: string;
   files: RemoteFile[];
+}
+
+interface SyncPlan {
+  toDownload: Map<string, RemoteFile>;
+  toUpload: Map<string, TFile>;
+  toDeleteLocal: Set<string>;
+  toDeleteRemote: Set<string>;
+}
+
+interface PushResult {
+  uploaded: number;
+  deletedRemote: number;
+  skipped: number;
+}
+
+class StaleRemoteHeadError extends Error {
+  readonly cause: GitHubApiError;
+
+  constructor(cause: GitHubApiError) {
+    super("Remote branch advanced during push");
+    this.name = "StaleRemoteHeadError";
+    this.cause = cause;
+  }
 }
 
 export class SyncEngine {
@@ -85,14 +109,10 @@ export class SyncEngine {
     ];
     const ignore = new IgnoreMatcher(ALWAYS_IGNORE);
 
-    const index = await this.indexStore.load();
+    const baseIndex = await this.indexStore.load();
     const localFiles = this.collectLocalFiles(ignore);
     let snapshot = await this.getRemoteSnapshot();
 
-    const toDownload = new Map<string, RemoteFile>();
-    const toUpload = new Map<string, TFile>();
-    const toDeleteLocal = new Set<string>();
-    const toDeleteRemote = new Set<string>();
     let skipped = 0;
     const skippedFiles: string[] = [];
 
@@ -105,16 +125,111 @@ export class SyncEngine {
       }
     }
 
-    const initFile = snapshot.files.find((f) => f.path === ".vault-sync-init");
+    let index = cloneIndexState(baseIndex);
+    let plan = this.planSync(options, index, localFiles, snapshot, ignore, now);
+
+    let uploaded = 0;
+    let deletedRemote = 0;
+    let pushAttempts = 0;
+
+    while (
+      options.allowPush &&
+      (plan.toUpload.size > 0 || plan.toDeleteRemote.size > 0)
+    ) {
+      try {
+        const pushResult = await this.pushPlan(
+          plan,
+          snapshot,
+          index,
+          skippedFiles
+        );
+        uploaded += pushResult.uploaded;
+        deletedRemote += pushResult.deletedRemote;
+        skipped += pushResult.skipped;
+        break;
+      } catch (error) {
+        if (error instanceof StaleRemoteHeadError && pushAttempts < MAX_PUSH_RETRIES) {
+          pushAttempts += 1;
+          snapshot = await this.getRemoteSnapshot();
+          index = cloneIndexState(baseIndex);
+          plan = this.planSync(options, index, localFiles, snapshot, ignore, now);
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    let downloaded = 0;
+    let deletedLocal = 0;
+    if (options.allowPull) {
+      for (const path of plan.toDeleteLocal) {
+        const target = this.app.vault.getAbstractFileByPath(path);
+        if (target instanceof TFile) {
+          await this.app.vault.delete(target);
+          deletedLocal += 1;
+        }
+        removeEntry(index, path);
+      }
+
+      for (const remote of plan.toDownload.values()) {
+        if (remote.size > MAX_BLOB_BYTES) {
+          skipped += 1;
+          skippedFiles.push(remote.path);
+          continue;
+        }
+        const file = await this.writeRemoteFile(remote);
+        if (!file) {
+          skipped += 1;
+          continue;
+        }
+
+        const entry = ensureEntry(index, normalizeVaultPath(remote.path));
+        entry.remoteSha = remote.sha;
+        entry.lastRemoteCommitTime = snapshot.commitTime;
+        entry.lastSynced = now;
+        entry.localMtime = file.stat.mtime;
+        entry.deletedLocally = false;
+        entry.localDeletedAt = undefined;
+        downloaded += 1;
+      }
+    }
+
+    await this.indexStore.save(index);
+
+    return {
+      uploaded,
+      downloaded,
+      deletedLocal,
+      deletedRemote,
+      skipped,
+      skippedFiles
+    };
+  }
+
+  private planSync(
+    options: { allowPull: boolean; allowPush: boolean },
+    index: SyncIndexState,
+    localFiles: Map<string, TFile>,
+    snapshot: RemoteSnapshot,
+    ignore: IgnoreMatcher,
+    now: number
+  ): SyncPlan {
+    const toDownload = new Map<string, RemoteFile>();
+    const toUpload = new Map<string, TFile>();
+    const toDeleteLocal = new Set<string>();
+    const toDeleteRemote = new Set<string>();
+
+    let snapshotFiles = snapshot.files;
+    const initFile = snapshotFiles.find((file) => file.path === ".vault-sync-init");
     if (initFile) {
-      snapshot.files = snapshot.files.filter((f) => f.path !== ".vault-sync-init");
+      snapshotFiles = snapshotFiles.filter((file) => file.path !== ".vault-sync-init");
       if (options.allowPush) {
         toDeleteRemote.add(".vault-sync-init");
       }
     }
 
     const remoteMap = new Map<string, RemoteFile>(
-      snapshot.files.map((file) => [normalizeVaultPath(file.path), file])
+      snapshotFiles.map((file) => [normalizeVaultPath(file.path), file])
     );
 
     const queueDownload = (remote: RemoteFile): void => {
@@ -239,136 +354,106 @@ export class SyncEngine {
       }
     }
 
-    let downloaded = 0;
-    let deletedLocal = 0;
-    if (options.allowPull) {
-      for (const path of toDeleteLocal) {
-        const target = this.app.vault.getAbstractFileByPath(path);
-        if (target instanceof TFile) {
-          await this.app.vault.delete(target);
-          deletedLocal += 1;
-        }
-        removeEntry(index, path);
+    return { toDownload, toUpload, toDeleteLocal, toDeleteRemote };
+  }
+
+  private async pushPlan(
+    plan: SyncPlan,
+    snapshot: RemoteSnapshot,
+    index: SyncIndexState,
+    skippedFiles: string[]
+  ): Promise<PushResult> {
+    const treeEntries: Array<{
+      path: string;
+      mode: string;
+      type: "blob";
+      sha: string | null;
+    }> = [];
+    const pendingIndexUpdates: Array<{
+      path: string;
+      localMtime: number;
+      blobSha: string;
+    }> = [];
+
+    let skipped = 0;
+
+    for (const file of plan.toUpload.values()) {
+      const filePath = normalizeVaultPath(file.path);
+      const blobData = await this.readFileBinary(file, skippedFiles);
+      if (!blobData) {
+        skipped += 1;
+        continue;
       }
 
-      for (const remote of toDownload.values()) {
-        if (remote.size > MAX_BLOB_BYTES) {
-          skipped += 1;
-          skippedFiles.push(remote.path);
-          continue;
-        }
-        const file = await this.writeRemoteFile(remote);
-        if (!file) {
-          skipped += 1;
-          continue;
-        }
-
-        const entry = ensureEntry(index, normalizeVaultPath(remote.path));
-        entry.remoteSha = remote.sha;
-        entry.lastRemoteCommitTime = snapshot.commitTime;
-        entry.lastSynced = now;
-        entry.localMtime = file.stat.mtime;
-        entry.deletedLocally = false;
-        entry.localDeletedAt = undefined;
-        downloaded += 1;
-      }
+      const blobSha = await this.client.createBinaryBlob(blobData);
+      treeEntries.push({
+        path: filePath,
+        mode: "100644",
+        type: "blob",
+        sha: blobSha
+      });
+      pendingIndexUpdates.push({
+        path: filePath,
+        localMtime: file.stat.mtime,
+        blobSha
+      });
     }
 
+    for (const path of plan.toDeleteRemote.values()) {
+      treeEntries.push({
+        path,
+        mode: "100644",
+        type: "blob",
+        sha: null
+      });
+    }
+
+    if (treeEntries.length === 0) {
+      return { uploaded: 0, deletedRemote: 0, skipped };
+    }
+
+    const treeSha = await this.client.createTree(
+      snapshot.treeSha || undefined,
+      treeEntries
+    );
+    const parents = snapshot.commitSha ? [snapshot.commitSha] : [];
+    const message = `Vault Sync : edited by ${this.settings.deviceName || detectDeviceName()
+      }`;
+    const commitSha = await this.client.createCommit(message, treeSha, parents);
+
+    try {
+      if (snapshot.commitSha) {
+        await this.client.updateBranchRef(commitSha);
+      } else {
+        await this.client.createBranchRef(commitSha);
+      }
+    } catch (error) {
+      if (error instanceof GitHubApiError && error.status === 422) {
+        throw new StaleRemoteHeadError(error);
+      }
+      throw error;
+    }
+
+    const commitTime = Date.now();
     let uploaded = 0;
-    let deletedRemote = 0;
-    if (options.allowPush) {
-      const treeEntries: Array<{
-        path: string;
-        mode: string;
-        type: "blob";
-        sha: string | null;
-      }> = [];
-      const pendingIndexUpdates: Array<{
-        path: string;
-        localMtime: number;
-        blobSha: string;
-      }> = [];
-
-      for (const file of toUpload.values()) {
-        const filePath = normalizeVaultPath(file.path);
-        const blobData = await this.readFileBinary(file, skippedFiles);
-        if (!blobData) {
-          skipped += 1;
-          continue;
-        }
-
-        const blobSha = await this.client.createBinaryBlob(blobData);
-        treeEntries.push({
-          path: filePath,
-          mode: "100644",
-          type: "blob",
-          sha: blobSha
-        });
-        pendingIndexUpdates.push({
-          path: filePath,
-          localMtime: file.stat.mtime,
-          blobSha
-        });
-      }
-
-      for (const path of toDeleteRemote.values()) {
-        treeEntries.push({
-          path,
-          mode: "100644",
-          type: "blob",
-          sha: null
-        });
-      }
-
-      if (treeEntries.length > 0) {
-        const treeSha = await this.client.createTree(
-          snapshot.treeSha || undefined,
-          treeEntries
-        );
-        const parents = snapshot.commitSha ? [snapshot.commitSha] : [];
-        const message = `Vault Sync : edited by ${this.settings.deviceName || detectDeviceName()
-          }`;
-        const commitSha = await this.client.createCommit(
-          message,
-          treeSha,
-          parents
-        );
-
-        if (snapshot.commitSha) {
-          await this.client.updateBranchRef(commitSha);
-        } else {
-          await this.client.createBranchRef(commitSha);
-        }
-
-        const commitTime = Date.now();
-        for (const update of pendingIndexUpdates) {
-          const entry = ensureEntry(index, update.path);
-          entry.remoteSha = update.blobSha;
-          entry.localMtime = update.localMtime;
-          entry.lastRemoteCommitTime = commitTime;
-          entry.lastSynced = commitTime;
-          entry.deletedLocally = false;
-          entry.localDeletedAt = undefined;
-          uploaded += 1;
-        }
-
-        for (const path of toDeleteRemote) {
-          removeEntry(index, path);
-          deletedRemote += 1;
-        }
-      }
+    for (const update of pendingIndexUpdates) {
+      const entry = ensureEntry(index, update.path);
+      entry.remoteSha = update.blobSha;
+      entry.localMtime = update.localMtime;
+      entry.lastRemoteCommitTime = commitTime;
+      entry.lastSynced = commitTime;
+      entry.deletedLocally = false;
+      entry.localDeletedAt = undefined;
+      uploaded += 1;
     }
 
-    await this.indexStore.save(index);
+    let deletedRemote = 0;
+    for (const path of plan.toDeleteRemote) {
+      removeEntry(index, path);
+      deletedRemote += 1;
+    }
 
-    return {
-      uploaded,
-      downloaded,
-      deletedLocal,
-      deletedRemote,
-      skipped,
-      skippedFiles
-    };
+    return { uploaded, deletedRemote, skipped };
   }
 
   private collectLocalFiles(ignore: IgnoreMatcher): Map<string, TFile> {
@@ -466,4 +551,12 @@ function base64ToArrayBuffer(base64: string): ArrayBuffer {
     bytes[i] = binary.charCodeAt(i);
   }
   return bytes.buffer;
+}
+
+function cloneIndexState(index: SyncIndexState): SyncIndexState {
+  const entries: Record<string, SyncIndexEntry> = {};
+  for (const [path, entry] of Object.entries(index.entries)) {
+    entries[path] = { ...entry };
+  }
+  return { entries };
 }
