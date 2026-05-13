@@ -197,7 +197,7 @@ export class VaultSyncSettingTab extends PluginSettingTab {
     const footer = containerEl.createEl("p", { cls: "vault-sync-footer" });
     footer.createEl("span", { text: "To know how to set up, visit the " });
     footer.createEl("a", {
-      href: "https://github.com/kevinmkchin/Obsidian-GitHub-Sync/blob/main/README.md",
+      href: "https://github.com/zyr-ux/Vault-Sync/blob/main/README.md",
       text: "README"
     });
     footer.createEl("span", { text: "." });
