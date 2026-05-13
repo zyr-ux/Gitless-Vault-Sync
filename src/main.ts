@@ -7,12 +7,15 @@ import {
 import { ensureEntry, normalizePluginData } from "./sync/IndexStore";
 import { GitHubApiError, GitHubClient } from "./github/GitHubClient";
 import { IndexStore } from "./sync/IndexStore";
+import { IgnoreMatcher } from "./sync/IgnoreMatcher";
 import { SyncEngine, type SyncResult } from "./sync/SyncEngine";
 
 type SyncMode = "pull" | "push" | "sync";
 type NoticeSeverity = "INFO" | "WARNING" | "ERROR";
 
 const FOREGROUND_SYNC_COOLDOWN_MS = 15000;
+const MIN_SYNC_COOLDOWN_MS = 30000;
+const ABUSE_PAUSE_DURATION_MS = 15 * 60 * 1000;
 
 export default class VaultSyncPlugin extends Plugin {
   settings!: VaultSyncSettings;
@@ -26,7 +29,12 @@ export default class VaultSyncPlugin extends Plugin {
   private pendingMode: SyncMode | null = null;
   private pendingNotice = false;
   private lastForegroundSyncAt = 0;
+  private lastAutoPushAt = 0;
+  private lastAutoPullAt = 0;
+  private pausedUntil = 0;
   private syncingNotice?: Notice;
+  private suppressAutoPush = false;
+  private eventIgnoreMatcher?: IgnoreMatcher;
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -99,6 +107,7 @@ export default class VaultSyncPlugin extends Plugin {
       this.indexStore,
       this.settings
     );
+    this.rebuildEventIgnoreMatcher();
   }
 
   private applySettings(): void {
@@ -114,6 +123,7 @@ export default class VaultSyncPlugin extends Plugin {
       pathPrefix: this.settings.repoPathPrefix
     });
     this.syncEngine.updateSettings(this.settings);
+    this.rebuildEventIgnoreMatcher();
     this.startAutoPull();
   }
 
@@ -121,6 +131,9 @@ export default class VaultSyncPlugin extends Plugin {
     this.registerEvent(
       this.app.vault.on("modify", (file) => {
         if (file instanceof TFile) {
+          if (this.shouldIgnorePath(file.path)) {
+            return;
+          }
           this.schedulePush();
         }
       })
@@ -129,6 +142,9 @@ export default class VaultSyncPlugin extends Plugin {
     this.registerEvent(
       this.app.vault.on("create", (file) => {
         if (file instanceof TFile) {
+          if (this.shouldIgnorePath(file.path)) {
+            return;
+          }
           this.schedulePush();
         }
       })
@@ -137,6 +153,9 @@ export default class VaultSyncPlugin extends Plugin {
     this.registerEvent(
       this.app.vault.on("delete", (file) => {
         if (file instanceof TFile) {
+          if (this.shouldIgnorePath(file.path)) {
+            return;
+          }
           this.schedulePush();
           void this.markDeleted(file);
         }
@@ -146,6 +165,9 @@ export default class VaultSyncPlugin extends Plugin {
     this.registerEvent(
       this.app.vault.on("rename", (file, oldPath) => {
         if (file instanceof TFile) {
+          if (this.shouldIgnorePath(file.path) || this.shouldIgnorePath(oldPath)) {
+            return;
+          }
           this.schedulePush();
           if (oldPath) {
             void this.markRenamed(file, oldPath);
@@ -162,7 +184,7 @@ export default class VaultSyncPlugin extends Plugin {
   }
 
   private requestForegroundPull(): void {
-    if (!this.shouldAutoPull() || !this.isConfigured()) {
+    if (this.settings.syncIntervalSec <= 0 || !this.isConfigured()) {
       return;
     }
 
@@ -182,9 +204,22 @@ export default class VaultSyncPlugin extends Plugin {
       return;
     }
 
-    this.intervalId = window.setInterval(() => {
-      this.requestSync("pull");
-    }, this.settings.syncIntervalSec * 1000);
+    const scheduleNext = () => {
+      this.intervalId = window.setTimeout(async () => {
+        const start = Date.now();
+        await this.requestSync("pull");
+        const duration = Date.now() - start;
+
+        // Base interval + jitter (0-30s) - duration compensation
+        const baseMs = this.settings.syncIntervalSec * 1000;
+        const jitterMs = Math.random() * 30000;
+        const nextDelay = Math.max(MIN_SYNC_COOLDOWN_MS, baseMs + jitterMs - duration);
+
+        scheduleNext();
+      }, this.settings.syncIntervalSec * 1000) as unknown as number;
+    };
+
+    scheduleNext();
   }
 
   private shouldAutoPull(): boolean {
@@ -196,6 +231,10 @@ export default class VaultSyncPlugin extends Plugin {
 
   private schedulePush(): void {
     if (!this.isConfigured()) {
+      return;
+    }
+
+    if (this.suppressAutoPush) {
       return;
     }
 
@@ -217,6 +256,15 @@ export default class VaultSyncPlugin extends Plugin {
       return;
     }
 
+    if (showNotice && this.pausedUntil > Date.now()) {
+      const waitMins = Math.ceil((this.pausedUntil - Date.now()) / 60000);
+      this.showNotice(
+        `GitHub has temporarily rate-limited automated syncing. Manual sync may still fail until the cooldown expires (approx. ${waitMins}m).`,
+        "WARNING",
+        10000
+      );
+    }
+
     this.pendingMode = mergeModes(this.pendingMode, mode);
     this.pendingNotice = this.pendingNotice || showNotice;
     void this.runNextSync();
@@ -232,10 +280,31 @@ export default class VaultSyncPlugin extends Plugin {
       return;
     }
 
+    const isManual = this.pendingNotice;
+    const now = Date.now();
+
+    // Check abuse pause for automated syncs
+    if (!isManual && this.pausedUntil > now) {
+      this.pendingMode = null;
+      this.pendingNotice = false;
+      return;
+    }
+
+    // Check independent cooldowns for automated syncs
+    if (!isManual) {
+      if (mode === "push" && now - this.lastAutoPushAt < MIN_SYNC_COOLDOWN_MS) {
+        return; // Keep pendingMode as "push" to try again via debounce or interval
+      }
+      if (mode === "pull" && now - this.lastAutoPullAt < MIN_SYNC_COOLDOWN_MS) {
+        return;
+      }
+    }
+
     this.pendingMode = null;
     const shouldNotify = this.pendingNotice;
     this.pendingNotice = false;
     this.syncInFlight = true;
+    this.suppressAutoPush = mode !== "push";
 
     if (shouldNotify && Platform.isDesktop) {
       this.showSyncingNotice();
@@ -245,10 +314,14 @@ export default class VaultSyncPlugin extends Plugin {
       let result: SyncResult;
       if (mode === "pull") {
         result = await this.syncEngine.pull();
+        this.lastAutoPullAt = Date.now();
       } else if (mode === "push") {
         result = await this.syncEngine.push();
+        this.lastAutoPushAt = Date.now();
       } else {
         result = await this.syncEngine.sync();
+        this.lastAutoPullAt = Date.now();
+        this.lastAutoPushAt = Date.now();
       }
 
       const hadSpinner = !!this.syncingNotice;
@@ -269,6 +342,15 @@ export default class VaultSyncPlugin extends Plugin {
 
       console.error("Vault Sync error details:", error);
       if (error instanceof GitHubApiError) {
+        if (error.isAbuseLimit) {
+          this.pausedUntil = Date.now() + ABUSE_PAUSE_DURATION_MS;
+          this.showNotice(
+            "GitHub secondary rate limit triggered. Automated syncing paused for 15 minutes.",
+            "ERROR",
+            10000
+          );
+        }
+
         if (error.status === 401 || error.status === 403) {
           this.pendingMode = null;
         }
@@ -280,6 +362,7 @@ export default class VaultSyncPlugin extends Plugin {
     } finally {
       this.hideSyncingNotice();
       this.syncInFlight = false;
+      this.suppressAutoPush = false;
       if (this.pendingMode) {
         void this.runNextSync();
       }
@@ -307,7 +390,7 @@ export default class VaultSyncPlugin extends Plugin {
 
   private clearInterval(): void {
     if (this.intervalId) {
-      window.clearInterval(this.intervalId);
+      window.clearTimeout(this.intervalId);
       this.intervalId = null;
     }
   }
@@ -407,6 +490,9 @@ export default class VaultSyncPlugin extends Plugin {
     if (!this.indexStore) {
       return;
     }
+    if (this.shouldIgnorePath(file.path)) {
+      return;
+    }
 
     const index = await this.indexStore.load();
     const path = normalizeVaultPath(file.path);
@@ -418,6 +504,9 @@ export default class VaultSyncPlugin extends Plugin {
 
   private async markRenamed(file: TFile, oldPath: string): Promise<void> {
     if (!this.indexStore) {
+      return;
+    }
+    if (this.shouldIgnorePath(file.path) || this.shouldIgnorePath(oldPath)) {
       return;
     }
 
@@ -444,6 +533,39 @@ export default class VaultSyncPlugin extends Plugin {
     await this.indexStore.save(index);
   }
 
+  private rebuildEventIgnoreMatcher(): void {
+    const ALWAYS_IGNORE = [
+      ".obsidian/workspace",
+      ".obsidian/workspace.json",
+      ".obsidian/workspace-mobile.json",
+      ".obsidian/cache",
+      ".obsidian/logs",
+      ".git/**",
+      ".stfolder/**",
+      ".vault-sync-init",
+      ".trash",
+      ".DS_Store",
+      ".obsidian/plugins/vault-sync/data.json",
+      ".obsidian/plugins/**/data.json"
+    ];
+    const userIgnorePatterns = (this.settings.ignorePatterns ?? []).filter(
+      (pattern) => !isObsidianPattern(pattern)
+    );
+    const ignorePatterns = [...ALWAYS_IGNORE, ...userIgnorePatterns];
+    this.eventIgnoreMatcher = new IgnoreMatcher(ignorePatterns);
+  }
+
+  private shouldIgnorePath(path: string | null | undefined): boolean {
+    if (!path) {
+      return false;
+    }
+    if (!this.eventIgnoreMatcher) {
+      this.rebuildEventIgnoreMatcher();
+    }
+    return this.eventIgnoreMatcher
+      ? this.eventIgnoreMatcher.ignores(normalizeVaultPath(path))
+      : false;
+  }
   private showSyncNotice(result: SyncResult, mode: SyncMode): void {
     const changes =
       result.uploaded +
@@ -505,6 +627,10 @@ function mergeModes(current: SyncMode | null, next: SyncMode): SyncMode {
 
 function normalizeVaultPath(path: string): string {
   return path.replace(/\\/g, "/").replace(/^\//, "");
+}
+
+function isObsidianPattern(pattern: string): boolean {
+  return normalizeVaultPath(pattern).startsWith(".obsidian/");
 }
 
 export function detectDeviceName(): string {

@@ -38,6 +38,7 @@ export interface GitHubApiErrorDetails {
   requestId?: string;
   retryAfter?: number;
   rateLimitResetAt?: number;
+  isAbuseLimit?: boolean;
 }
 
 export class GitHubApiError extends Error {
@@ -45,6 +46,7 @@ export class GitHubApiError extends Error {
   requestId?: string;
   retryAfter?: number;
   rateLimitResetAt?: number;
+  isAbuseLimit: boolean;
 
   constructor(details: GitHubApiErrorDetails) {
     super(details.message);
@@ -52,6 +54,7 @@ export class GitHubApiError extends Error {
     this.requestId = details.requestId;
     this.retryAfter = details.retryAfter;
     this.rateLimitResetAt = details.rateLimitResetAt;
+    this.isAbuseLimit = details.isAbuseLimit ?? false;
   }
 }
 
@@ -78,6 +81,7 @@ export class GitHubClient {
   private apiBaseUrl: string;
   private cachedOwner?: string;
   private lastServerTimeMs?: number;
+  private commitChainPromise: Promise<any> = Promise.resolve();
 
   constructor(options: GitHubClientOptions) {
     this.token = options.token;
@@ -216,23 +220,25 @@ export class GitHubClient {
     baseTreeSha: string | undefined,
     entries: GitCreateTreeEntry[]
   ): Promise<string> {
-    const payload: Record<string, unknown> = {
-      tree: entries.map((entry) => ({
-        ...entry,
-        path: this.addPrefix(normalizeVaultPath(entry.path))
-      }))
-    };
+    return this.serializeCommitChain(async () => {
+      const payload: Record<string, unknown> = {
+        tree: entries.map((entry) => ({
+          ...entry,
+          path: this.addPrefix(normalizeVaultPath(entry.path))
+        }))
+      };
 
-    if (baseTreeSha) {
-      payload.base_tree = baseTreeSha;
-    }
+      if (baseTreeSha) {
+        payload.base_tree = baseTreeSha;
+      }
 
-    const response = await this.request<{ sha: string }>(
-      "POST",
-      await this.buildPath("/git/trees"),
-      payload
-    );
-    return response.sha;
+      const response = await this.request<{ sha: string }>(
+        "POST",
+        await this.buildPath("/git/trees"),
+        payload
+      );
+      return response.sha;
+    });
   }
 
   async createCommit(
@@ -240,38 +246,44 @@ export class GitHubClient {
     treeSha: string,
     parentShas: string[]
   ): Promise<string> {
-    const response = await this.request<{ sha: string }>(
-      "POST",
-      await this.buildPath("/git/commits"),
-      {
-        message,
-        tree: treeSha,
-        parents: parentShas
-      }
-    );
-    return response.sha;
+    return this.serializeCommitChain(async () => {
+      const response = await this.request<{ sha: string }>(
+        "POST",
+        await this.buildPath("/git/commits"),
+        {
+          message,
+          tree: treeSha,
+          parents: parentShas
+        }
+      );
+      return response.sha;
+    });
   }
 
   async updateBranchRef(newSha: string, force = false): Promise<void> {
-    await this.request(
-      "PATCH",
-      await this.buildPath(`/git/refs/heads/${encodeURIComponent(this.branch)}`),
-      {
-        sha: newSha,
-        force
-      }
-    );
+    await this.serializeCommitChain(async () => {
+      await this.request(
+        "PATCH",
+        await this.buildPath(`/git/refs/heads/${encodeURIComponent(this.branch)}`),
+        {
+          sha: newSha,
+          force
+        }
+      );
+    });
   }
 
   async createBranchRef(newSha: string): Promise<void> {
-    await this.request(
-      "POST",
-      await this.buildPath("/git/refs"),
-      {
-        ref: `refs/heads/${this.branch}`,
-        sha: newSha
-      }
-    );
+    await this.serializeCommitChain(async () => {
+      await this.request(
+        "POST",
+        await this.buildPath("/git/refs"),
+        {
+          ref: `refs/heads/${this.branch}`,
+          sha: newSha
+        }
+      );
+    });
   }
 
   async initializeRepository(): Promise<void> {
@@ -317,6 +329,12 @@ export class GitHubClient {
       return path;
     }
     return `${this.pathPrefix}${path}`;
+  }
+
+  private serializeCommitChain<T>(work: () => Promise<T>): Promise<T> {
+    const next = this.commitChainPromise.then(work);
+    this.commitChainPromise = next.catch(() => { });
+    return next;
   }
 
   private async request<T = unknown>(
@@ -392,6 +410,12 @@ export class GitHubClient {
       10
     );
 
+    const lowerMessage = message.toLowerCase();
+    const isAbuseLimit =
+      response.status === 403 &&
+      (lowerMessage.includes("secondary rate limit") ||
+        lowerMessage.includes("abuse detection"));
+
     throw new GitHubApiError({
       status: response.status,
       message,
@@ -399,7 +423,8 @@ export class GitHubClient {
       retryAfter: Number.isFinite(retryAfter) ? retryAfter : undefined,
       rateLimitResetAt: Number.isFinite(rateLimitReset)
         ? rateLimitReset * 1000
-        : undefined
+        : undefined,
+      isAbuseLimit
     });
   }
 }

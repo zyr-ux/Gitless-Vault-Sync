@@ -27,7 +27,7 @@ export const DEFAULT_SETTINGS: VaultSyncSettings = {
   repoPathPrefix: "",
   deviceName: "",
   debounceMs: 3000,
-  syncIntervalSec: 60,
+  syncIntervalSec: 300,
   ignorePatterns: [
     ".obsidian/workspace",
     ".obsidian/workspace.json",

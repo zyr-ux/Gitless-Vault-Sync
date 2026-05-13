@@ -7,12 +7,15 @@ export interface SyncIndexEntry {
   lastSynced: number;
   lastRemoteCommitTime: number;
   localMtime: number;
+  localHash: string;
+  size: number;
   deletedLocally?: boolean;
   localDeletedAt?: number;
 }
 
 export interface SyncIndexState {
   entries: Record<string, SyncIndexEntry>;
+  lastKnownRemoteHeadSha: string;
 }
 
 export interface PluginData {
@@ -20,7 +23,7 @@ export interface PluginData {
   index: SyncIndexState;
 }
 
-const EMPTY_INDEX: SyncIndexState = { entries: {} };
+const EMPTY_INDEX: SyncIndexState = { entries: {}, lastKnownRemoteHeadSha: "" };
 
 export class IndexStore {
   private plugin: Plugin;
@@ -31,7 +34,10 @@ export class IndexStore {
 
   async load(): Promise<SyncIndexState> {
     const raw = await this.plugin.loadData();
-    return normalizePluginData(raw, DEFAULT_SETTINGS).index;
+    const index = normalizePluginData(raw, DEFAULT_SETTINGS).index;
+    const count = Object.keys(index.entries).length;
+    console.warn(`[Sync] Index load: ${count} entries`);
+    return index;
   }
 
   async save(index: SyncIndexState): Promise<void> {
@@ -39,6 +45,8 @@ export class IndexStore {
     const data = normalizePluginData(raw, DEFAULT_SETTINGS);
     data.index = index;
     await this.plugin.saveData(data);
+    const count = Object.keys(index.entries).length;
+    console.warn(`[Sync] Index save: ${count} entries`);
   }
 }
 
@@ -68,7 +76,7 @@ export function normalizePluginData(
 
 function normalizeIndex(raw: unknown): SyncIndexState {
   if (!isRecord(raw) || !isRecord(raw.entries)) {
-    return { entries: {} };
+    return { entries: {}, lastKnownRemoteHeadSha: "" };
   }
 
   const entries: Record<string, SyncIndexEntry> = {};
@@ -83,6 +91,8 @@ function normalizeIndex(raw: unknown): SyncIndexState {
       lastSynced: numberOrZero(value.lastSynced),
       lastRemoteCommitTime: numberOrZero(value.lastRemoteCommitTime),
       localMtime: numberOrZero(value.localMtime),
+      localHash: String(value.localHash ?? ""),
+      size: numberOrZero(value.size),
       deletedLocally: value.deletedLocally === true,
       localDeletedAt: value.localDeletedAt
         ? numberOrZero(value.localDeletedAt)
@@ -90,7 +100,10 @@ function normalizeIndex(raw: unknown): SyncIndexState {
     };
   }
 
-  return { entries };
+  return {
+    entries,
+    lastKnownRemoteHeadSha: String(raw.lastKnownRemoteHeadSha ?? "")
+  };
 }
 
 function numberOrZero(value: unknown): number {
@@ -103,7 +116,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export function emptyIndex(): SyncIndexState {
-  return { entries: {} };
+  return { entries: {}, lastKnownRemoteHeadSha: "" };
 }
 
 export function ensureEntry(
@@ -122,6 +135,8 @@ export function ensureEntry(
     lastSynced: 0,
     lastRemoteCommitTime: 0,
     localMtime: 0,
+    localHash: "",
+    size: 0,
     ...initial
   };
 

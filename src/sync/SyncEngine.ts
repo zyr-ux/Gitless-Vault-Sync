@@ -17,7 +17,8 @@ import { detectDeviceName } from "../main";
 
 const MAX_BLOB_BYTES = 100 * 1024 * 1024;
 const MAX_PUSH_RETRIES = 2;
-const MAX_FILE_IO_CONCURRENCY = 8;
+const MAX_FILE_IO_CONCURRENCY = 3;
+const HASH_THRESHOLD_BYTES = 25 * 1024 * 1024;
 
 export interface SyncResult {
   uploaded: number;
@@ -110,9 +111,13 @@ export class SyncEngine {
       ".obsidian/workspace-mobile.json",
       ".obsidian/cache",
       ".obsidian/logs",
+      ".git/**",
+      ".stfolder/**",
+      ".vault-sync-init",
       ".trash",
       ".DS_Store",
-      ".obsidian/plugins/vault-sync/data.json"
+      ".obsidian/plugins/vault-sync/data.json",
+      ".obsidian/plugins/**/data.json"
     ];
     const userIgnorePatterns = (this.settings.ignorePatterns ?? []).filter(
       (pattern) => !isObsidianPattern(pattern)
@@ -121,11 +126,16 @@ export class SyncEngine {
     const ignore = new IgnoreMatcher(ignorePatterns);
 
     const baseIndex = await this.indexStore.load();
+    const indexCount = Object.keys(baseIndex.entries).length;
+    console.warn(
+      `[Sync] Index entries: ${indexCount}, lastKnownRemoteHeadSha: ${baseIndex.lastKnownRemoteHeadSha || "(empty)"}`
+    );
     const localFiles = await this.collectLocalFiles(ignore);
-    const snapshot = await this.getRemoteSnapshot();
+    console.warn(`[Sync] Local files considered: ${localFiles.size}`);
+    const snapshot = await this.getRemoteSnapshot(baseIndex);
 
     const index = cloneIndexState(baseIndex);
-    const plan = this.planSync(options, index, localFiles, snapshot, ignore, now);
+    const plan = await this.planSync(options, index, localFiles, snapshot, ignore, now);
 
     return (
       plan.toDownload.size > 0 ||
@@ -147,9 +157,13 @@ export class SyncEngine {
       ".obsidian/workspace-mobile.json",
       ".obsidian/cache",
       ".obsidian/logs",
+      ".git/**",
+      ".stfolder/**",
+      ".vault-sync-init",
       ".trash",
       ".DS_Store",
-      ".obsidian/plugins/vault-sync/data.json"
+      ".obsidian/plugins/vault-sync/data.json",
+      ".obsidian/plugins/**/data.json"
     ];
     const userIgnorePatterns = (this.settings.ignorePatterns ?? []).filter(
       (pattern) => !isObsidianPattern(pattern)
@@ -158,8 +172,48 @@ export class SyncEngine {
     const ignore = new IgnoreMatcher(ignorePatterns);
 
     const baseIndex = await this.indexStore.load();
+
+    // Short-circuit: Check head before doing anything else
+    if (options.allowPull) {
+      try {
+        const headSha = await this.client.getBranchRef();
+        if (baseIndex.lastKnownRemoteHeadSha === headSha && headSha !== "") {
+          if (!options.allowPush) {
+            console.log(
+              `[Sync] Short-circuit: Remote head unchanged (${headSha}). Skipping pull.`
+            );
+            return {
+              uploaded: 0,
+              downloaded: 0,
+              deletedLocal: 0,
+              deletedRemote: 0,
+              skipped: 0,
+              skippedFiles: []
+            };
+          }
+
+          const hasLocalChanges = await this.detectLocalChanges(baseIndex, ignore);
+          if (!hasLocalChanges) {
+            console.log(
+              `[Sync] Short-circuit: Remote head unchanged (${headSha}) and no local changes. Skipping sync.`
+            );
+            return {
+              uploaded: 0,
+              downloaded: 0,
+              deletedLocal: 0,
+              deletedRemote: 0,
+              skipped: 0,
+              skippedFiles: []
+            };
+          }
+        }
+      } catch (e) {
+        // Fall back to full sync if head check fails
+      }
+    }
+
     const localFiles = await this.collectLocalFiles(ignore);
-    let snapshot = await this.getRemoteSnapshot();
+    let snapshot = await this.getRemoteSnapshot(baseIndex);
 
     let skipped = 0;
     const skippedFiles: string[] = [];
@@ -167,14 +221,14 @@ export class SyncEngine {
     if (!snapshot.commitSha && options.allowPush) {
       try {
         await this.client.initializeRepository();
-        snapshot = await this.getRemoteSnapshot();
+        snapshot = await this.getRemoteSnapshot(baseIndex);
       } catch (e) {
         console.warn("Failed to initialize empty repository", e);
       }
     }
 
     let index = cloneIndexState(baseIndex);
-    let plan = this.planSync(options, index, localFiles, snapshot, ignore, now);
+    let plan = await this.planSync(options, index, localFiles, snapshot, ignore, now);
 
     let uploaded = 0;
     let deletedRemote = 0;
@@ -198,9 +252,9 @@ export class SyncEngine {
       } catch (error) {
         if (error instanceof StaleRemoteHeadError && pushAttempts < MAX_PUSH_RETRIES) {
           pushAttempts += 1;
-          snapshot = await this.getRemoteSnapshot();
+          snapshot = await this.getRemoteSnapshot(baseIndex);
           index = cloneIndexState(baseIndex);
-          plan = this.planSync(options, index, localFiles, snapshot, ignore, now);
+          plan = await this.planSync(options, index, localFiles, snapshot, ignore, now);
           continue;
         }
         throw error;
@@ -249,6 +303,8 @@ export class SyncEngine {
 
         const entry = ensureEntry(index, normalizeVaultPath(result.remote.path));
         entry.remoteSha = result.remote.sha;
+        entry.localHash = result.remote.sha; // For downloads, we know the local hash matches remote
+        entry.size = result.remote.size;
         entry.lastRemoteCommitTime = snapshot.commitTime;
         entry.lastSynced = now;
         entry.localMtime = result.file.stat.mtime;
@@ -271,14 +327,14 @@ export class SyncEngine {
     };
   }
 
-  private planSync(
+  private async planSync(
     options: { allowPull: boolean; allowPush: boolean },
     index: SyncIndexState,
     localFiles: Map<string, LocalFileEntry>,
     snapshot: RemoteSnapshot,
     ignore: IgnoreMatcher,
     now: number
-  ): SyncPlan {
+  ): Promise<SyncPlan> {
     const toDownload = new Map<string, RemoteFile>();
     const toUpload = new Map<string, LocalFileEntry>();
     const toDeleteLocal = new Set<string>();
@@ -390,7 +446,23 @@ export class SyncEngine {
       } else if (remoteChanged) {
         queueDownload(remote);
       } else if (localChanged) {
-        queueUpload(local);
+        if (local.stat.size === entry.size) {
+          if (local.stat.size > HASH_THRESHOLD_BYTES) {
+            queueUpload(local);
+          } else {
+            const currentHash = await calculateGitSha(await local.readBinary());
+            if (currentHash === entry.localHash) {
+              console.log(`[Sync] Skipping upload for ${path}: content hash unchanged`);
+              // Update mtime so we don't check again next time if nothing changes
+              entry.localMtime = local.stat.mtime;
+            } else {
+              queueUpload(local);
+            }
+          }
+        } else {
+          // Size changed, definitely changed
+          queueUpload(local);
+        }
       }
     }
 
@@ -406,6 +478,21 @@ export class SyncEngine {
         if (!local) {
           queueDownload(remote);
         } else {
+          if (local.stat.size === remote.size && local.stat.size <= HASH_THRESHOLD_BYTES) {
+            const currentHash = await calculateGitSha(await local.readBinary());
+            if (currentHash === remote.sha) {
+              const newEntry = ensureEntry(index, path);
+              newEntry.remoteSha = remote.sha;
+              newEntry.localHash = currentHash;
+              newEntry.size = remote.size;
+              newEntry.lastRemoteCommitTime = snapshot.commitTime;
+              newEntry.lastSynced = now;
+              newEntry.localMtime = local.stat.mtime;
+              newEntry.deletedLocally = false;
+              newEntry.localDeletedAt = undefined;
+              continue;
+            }
+          }
           const adjustedLocalMtime = local.stat.mtime - clockSkewMs;
           if (adjustedLocalMtime >= snapshot.commitTime) {
             queueUpload(local);
@@ -444,13 +531,21 @@ export class SyncEngine {
     const pendingIndexUpdates: Array<{
       path: string;
       localMtime: number;
-      blobSha: string;
+      size: number;
+      localHash: string;
+      remoteSha: string;
     }> = [];
     const invalidTreePaths: string[] = [];
 
     let skipped = 0;
 
     const uploadTargets = Array.from(plan.toUpload.values());
+    if (uploadTargets.length > 0) {
+      const sample = uploadTargets.slice(0, 10).map((file) => file.path);
+      console.warn(
+        `[Sync] Uploading ${uploadTargets.length} file(s). Sample: ${sample.join(", ")}`
+      );
+    }
     const uploadResults = await runWithConcurrency(
       uploadTargets,
       MAX_FILE_IO_CONCURRENCY,
@@ -460,20 +555,27 @@ export class SyncEngine {
           if (invalidTreePaths.length < 5) {
             invalidTreePaths.push(filePath || file.path);
           }
-          return { filePath, localMtime: file.stat.mtime, blobSha: null };
+          return null;
         }
         const blobData = await this.readFileBinary(file, skippedFiles);
         if (!blobData) {
-          return { filePath, localMtime: file.stat.mtime, blobSha: null };
+          return null;
         }
 
         const blobSha = await this.client.createBinaryBlob(blobData);
-        return { filePath, localMtime: file.stat.mtime, blobSha };
+        const localHash = await calculateGitSha(blobData);
+        return {
+          filePath,
+          localMtime: file.stat.mtime,
+          size: file.stat.size,
+          localHash,
+          remoteSha: blobSha
+        };
       }
     );
 
     for (const result of uploadResults) {
-      if (!result.blobSha) {
+      if (!result) {
         skipped += 1;
         continue;
       }
@@ -482,12 +584,14 @@ export class SyncEngine {
         path: result.filePath,
         mode: "100644",
         type: "blob",
-        sha: result.blobSha
+        sha: result.remoteSha
       });
       pendingIndexUpdates.push({
         path: result.filePath,
         localMtime: result.localMtime,
-        blobSha: result.blobSha
+        size: result.size,
+        localHash: result.localHash,
+        remoteSha: result.remoteSha
       });
     }
 
@@ -529,6 +633,7 @@ export class SyncEngine {
       } else {
         await this.client.createBranchRef(commitSha);
       }
+      index.lastKnownRemoteHeadSha = commitSha;
     } catch (error) {
       if (error instanceof GitHubApiError && error.status === 422) {
         throw new StaleRemoteHeadError(error);
@@ -540,7 +645,9 @@ export class SyncEngine {
     let uploaded = 0;
     for (const update of pendingIndexUpdates) {
       const entry = ensureEntry(index, update.path);
-      entry.remoteSha = update.blobSha;
+      entry.remoteSha = update.remoteSha;
+      entry.localHash = update.localHash;
+      entry.size = update.size;
       entry.localMtime = update.localMtime;
       entry.lastRemoteCommitTime = commitTime;
       entry.lastSynced = commitTime;
@@ -605,9 +712,35 @@ export class SyncEngine {
   }
 
   private async listAllVaultFiles(): Promise<string[]> {
-    const results: string[] = [];
+    const results = new Set<string>();
     const invalidPaths: string[] = [];
-    const pending: string[] = [""];
+
+    for (const file of this.app.vault.getFiles()) {
+      const normalized = normalizeVaultPath(file.path);
+      if (!isValidGitPath(normalized)) {
+        if (invalidPaths.length < 5) {
+          invalidPaths.push(normalized || file.path);
+        }
+        continue;
+      }
+      results.add(normalized);
+    }
+
+    const obsidianFiles = await this.collectFilesInFolder(".obsidian");
+    for (const path of obsidianFiles) {
+      results.add(path);
+    }
+
+    if (invalidPaths.length > 0) {
+      console.warn("Vault Sync: skipped invalid paths", invalidPaths);
+    }
+
+    return Array.from(results);
+  }
+
+  private async collectFilesInFolder(folderPath: string): Promise<string[]> {
+    const results: string[] = [];
+    const pending: string[] = [folderPath];
 
     while (pending.length > 0) {
       const current = pending.pop();
@@ -618,36 +751,63 @@ export class SyncEngine {
       const listing = await this.app.vault.adapter.list(current);
       for (const file of listing.files) {
         const normalized = normalizeVaultPath(file);
-        if (!isValidGitPath(normalized)) {
-          if (invalidPaths.length < 5) {
-            invalidPaths.push(normalized || String(file));
-          }
-          continue;
+        if (isValidGitPath(normalized)) {
+          results.push(normalized);
         }
-        results.push(normalized);
       }
+
       for (const folder of listing.folders) {
         const normalized = normalizeVaultPath(folder);
-        if (!isValidGitPath(normalized)) {
-          if (invalidPaths.length < 5) {
-            invalidPaths.push(normalized || String(folder));
-          }
-          continue;
+        if (isValidGitPath(normalized)) {
+          pending.push(normalized);
         }
-        pending.push(normalized);
       }
-    }
-
-    if (invalidPaths.length > 0) {
-      console.warn("Vault Sync: skipped invalid paths", invalidPaths);
     }
 
     return results;
   }
 
-  private async getRemoteSnapshot(): Promise<RemoteSnapshot> {
+  private async detectLocalChanges(
+    index: SyncIndexState,
+    ignore: IgnoreMatcher
+  ): Promise<boolean> {
+    const localFiles = await this.collectLocalFiles(ignore);
+
+    for (const [path, entry] of Object.entries(index.entries)) {
+      if (ignore.ignores(path)) {
+        continue;
+      }
+      if (entry.deletedLocally) {
+        return true;
+      }
+
+      const local = localFiles.get(path);
+      if (!local) {
+        return true;
+      }
+
+      if (local.stat.size !== entry.size) {
+        return true;
+      }
+
+      if (local.stat.mtime > entry.localMtime) {
+        return true;
+      }
+    }
+
+    for (const path of localFiles.keys()) {
+      if (!index.entries[path]) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private async getRemoteSnapshot(index: SyncIndexState): Promise<RemoteSnapshot> {
     try {
       const snapshot = await this.client.getLatestSnapshot();
+      index.lastKnownRemoteHeadSha = snapshot.commitSha;
       const serverTimeMs = this.client.getLastServerTimeMs() ?? Date.now();
       return { ...snapshot, serverTimeMs };
     } catch (error) {
@@ -755,7 +915,22 @@ function cloneIndexState(index: SyncIndexState): SyncIndexState {
   for (const [path, entry] of Object.entries(index.entries)) {
     entries[path] = { ...entry };
   }
-  return { entries };
+  return {
+    entries,
+    lastKnownRemoteHeadSha: index.lastKnownRemoteHeadSha
+  };
+}
+
+async function calculateGitSha(data: ArrayBuffer): Promise<string> {
+  const header = `blob ${data.byteLength}\0`;
+  const headerBytes = new TextEncoder().encode(header);
+  const fullBytes = new Uint8Array(headerBytes.byteLength + data.byteLength);
+  fullBytes.set(headerBytes);
+  fullBytes.set(new Uint8Array(data), headerBytes.byteLength);
+  const hashBuffer = await crypto.subtle.digest("SHA-1", fullBytes);
+  return Array.from(new Uint8Array(hashBuffer))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 async function runWithConcurrency<T, R>(
