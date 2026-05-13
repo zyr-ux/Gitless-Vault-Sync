@@ -150,6 +150,11 @@ export class GitHubClient {
     files: RemoteFile[];
   }> {
     const latest = await this.getLatestTree();
+    if (latest.tree.truncated) {
+      throw new Error(
+        "Remote tree is truncated. Vault Sync cannot safely list all files."
+      );
+    }
     const files = latest.tree.tree
       .filter((item) => item.type === "blob")
       .map((item) => {
