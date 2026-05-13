@@ -101,6 +101,7 @@ Vault Sync/
   - Vault events: `modify`, `create`, `delete`, `rename` on any `TFile` → triggers debounced push.
 - **Auto-pull timer** — starts a `setInterval` that fires a pull on the configured interval (default 60 s). Restarted any time settings change.
 - **Sync-on-start** — if `syncOnStart` is enabled, queues a pull immediately after load.
+- **Foreground pull** — on mobile, a pull is requested when Obsidian becomes active again (debounced) to compensate for background timer throttling.
 
 #### Sync request queuing
 
@@ -184,6 +185,8 @@ All non-2xx responses are parsed into a typed `GitHubApiError` that surfaces:
 - `retry-after` (for abuse rate limits)
 - `x-ratelimit-reset` (for primary rate limits, converted to ms epoch)
 
+The client retries on rate-limited responses (429/403 with reset headers) with a bounded backoff. It also tracks the GitHub server time from the `Date` response header so the sync engine can compensate for clock skew.
+
 ---
 
 ### Sync Engine — `SyncEngine`
@@ -218,6 +221,18 @@ Regardless of user settings, these paths are always excluded from sync:
 #### Empty repository bootstrap
 
 If `getRemoteSnapshot()` returns an empty result (404 or 409 on a brand-new repo) and a push is allowed, `initializeRepository()` is called to create a placeholder `.vault-sync-init` file so the branch and first commit exist. The init file is then queued for deletion in the same sync run.
+
+#### Push retry
+
+Pushes are prepared from a snapshot of the remote tree. If the branch advances during the push, `updateBranchRef` returns a non-fast-forward error. The engine treats this as a stale-head signal, re-fetches the snapshot, re-plans, and retries a small number of times.
+
+#### Incremental index saves
+
+The index is persisted after successful push work and incrementally after downloads/deletions. This avoids losing partial work if the sync is interrupted.
+
+#### Concurrency
+
+Uploads and downloads run through a small concurrency pool to improve throughput without overwhelming mobile devices.
 
 #### File size limit
 

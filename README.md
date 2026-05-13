@@ -60,6 +60,8 @@ Vault Sync maintains a local **sync index** (stored in `data.json`) that tracks 
 
 This approach is fast, atomic on the push side, and works without ever calling `git` locally.
 
+When multiple devices push around the same time, Vault Sync retries on non-fast-forward errors and re-plans the sync so it can complete cleanly without leaving partial state.
+
 ---
 
 ## Setup
@@ -129,6 +131,8 @@ That's it — no `git init`, no terminal. Click the GitHub ribbon icon to do you
 
 Click the **GitHub icon** in the left ribbon to perform a full **Sync** (pull + push). This is the most common operation: it fetches any remote changes and pushes any local changes in a single step.
 
+On desktop, manual syncs show a short **"Syncing notes"** spinner notice that disappears once the sync completes.
+
 ### Command Palette
 
 Open the command palette (`Ctrl/Cmd + P`) and search for **Vault Sync** to access these commands:
@@ -152,6 +156,9 @@ Whenever you **create, modify, delete, or rename** a file in your vault, a push 
 Set **Auto-pull interval (sec)** in settings to a positive number (e.g. `60` for every minute). The plugin will silently poll for remote changes on that interval, keeping your vault in sync across devices.
 
 Set the value to `0` to disable automatic polling.
+
+> [!NOTE]
+> Auto-pull runs quietly in the background and does not show the manual sync spinner.
 
 ### Sync on Startup
 
@@ -194,6 +201,8 @@ Vault Sync uses a **timestamp-based** conflict resolution strategy:
   - Local mtime > remote commit time → **upload** local version
   - Remote commit time > local mtime → **download** remote version
 
+Vault Sync adjusts local timestamps using the GitHub server time to reduce incorrect decisions caused by device clock drift.
+
 This is a simple, last-write-wins approach. It works well for personal note-taking workflows where you typically edit on one device at a time.
 
 ### File Deletions
@@ -232,7 +241,7 @@ Files larger than **100 MB** are skipped and reported in the console. This match
 - **Single branch** — all syncs target one configured branch; branching workflows are not supported
 - **No binary diff** — binary files are uploaded as full blobs each time they change
 - **GitHub only** — the plugin is designed specifically for the GitHub REST API; other hosts are not supported
-- **Rate limits** — GitHub API rate limits apply. Large vaults or very frequent syncs may hit them. Vault Sync reports the reset time in the notice when this happens.
+- **Rate limits** — GitHub API rate limits apply. Large vaults or very frequent syncs may hit them. Vault Sync retries with backoff and reports the reset time in the notice when it still fails.
 
 ---
 
