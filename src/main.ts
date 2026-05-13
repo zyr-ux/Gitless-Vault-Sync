@@ -140,9 +140,12 @@ export default class VaultSyncPlugin extends Plugin {
     );
 
     this.registerEvent(
-      this.app.vault.on("rename", (file) => {
+      this.app.vault.on("rename", (file, oldPath) => {
         if (file instanceof TFile) {
           this.schedulePush();
+          if (oldPath) {
+            void this.markRenamed(file, oldPath);
+          }
         }
       })
     );
@@ -341,6 +344,34 @@ export default class VaultSyncPlugin extends Plugin {
     const entry = ensureEntry(index, path);
     entry.deletedLocally = true;
     entry.localDeletedAt = Date.now();
+    await this.indexStore.save(index);
+  }
+
+  private async markRenamed(file: TFile, oldPath: string): Promise<void> {
+    if (!this.indexStore) {
+      return;
+    }
+
+    const index = await this.indexStore.load();
+    const normalizedOldPath = normalizeVaultPath(oldPath);
+    const normalizedNewPath = normalizeVaultPath(file.path);
+    const now = Date.now();
+
+    const oldEntry = index.entries[normalizedOldPath];
+    if (oldEntry) {
+      oldEntry.deletedLocally = true;
+      oldEntry.localDeletedAt = oldEntry.localDeletedAt ?? now;
+    } else {
+      const entry = ensureEntry(index, normalizedOldPath);
+      entry.deletedLocally = true;
+      entry.localDeletedAt = now;
+    }
+
+    const newEntry = ensureEntry(index, normalizedNewPath);
+    newEntry.localMtime = file.stat.mtime;
+    newEntry.deletedLocally = false;
+    newEntry.localDeletedAt = undefined;
+
     await this.indexStore.save(index);
   }
 
