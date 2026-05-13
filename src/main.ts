@@ -238,10 +238,7 @@ export default class VaultSyncPlugin extends Plugin {
     this.syncInFlight = true;
 
     if (shouldNotify && Platform.isDesktop) {
-      const shouldShowSpinner = await this.shouldShowSyncSpinner(mode);
-      if (shouldShowSpinner) {
-        this.showSyncingNotice();
-      }
+      this.showSyncingNotice();
     }
 
     try {
@@ -272,6 +269,9 @@ export default class VaultSyncPlugin extends Plugin {
 
       console.error("Vault Sync error details:", error);
       if (error instanceof GitHubApiError) {
+        if (error.status === 401 || error.status === 403) {
+          this.pendingMode = null;
+        }
         this.showNotice(`Sync failed: ${this.formatGitHubError(error)}`, "ERROR", 10000);
       } else {
         const msg = error instanceof Error ? error.message : String(error);
@@ -360,26 +360,6 @@ export default class VaultSyncPlugin extends Plugin {
       notice.hide();
     }
     this.syncingNotice = undefined;
-  }
-
-  private async shouldShowSyncSpinner(mode: SyncMode): Promise<boolean> {
-    if (!this.syncEngine) {
-      return true;
-    }
-
-    const options =
-      mode === "pull"
-        ? { allowPull: true, allowPush: false }
-        : mode === "push"
-          ? { allowPull: false, allowPush: true }
-          : { allowPull: true, allowPush: true };
-
-    try {
-      return await this.syncEngine.hasPendingChanges(options);
-    } catch (error) {
-      console.warn("Failed to preflight sync changes", error);
-      return true;
-    }
   }
 
   private registerCommands(): void {

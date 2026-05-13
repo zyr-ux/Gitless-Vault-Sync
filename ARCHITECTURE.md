@@ -140,7 +140,9 @@ requestSync(mode)
 | `showSyncSuccessNotice` | `boolean` | `true` | Whether a success toast is shown |
 | `syncOnStart` | `boolean` | `true` | Pull on Obsidian startup |
 
-**Default ignore patterns:** `.obsidian/workspace`, `.obsidian/workspace.json`, `.obsidian/cache`, `.obsidian/logs`, `.obsidian/plugins`, `.trash`, `.DS_Store`
+**Default ignore patterns:** `.obsidian/workspace`, `.obsidian/workspace.json`, `.obsidian/workspace-mobile.json`, `.obsidian/cache`, `.obsidian/logs`, `.trash`, `.DS_Store`
+
+All other `.obsidian/` content (themes, plugins, snippets, config JSON files) is synced by default, except for the always-ignored files listed in the Sync Engine section.
 
 Settings and the sync index are co-persisted in Obsidian's `data.json` under a single `PluginData` envelope `{ settings, index }`, managed by `normalizePluginData` to handle schema migrations gracefully.
 

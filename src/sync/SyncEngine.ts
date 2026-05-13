@@ -38,7 +38,7 @@ interface RemoteSnapshot {
 
 interface SyncPlan {
   toDownload: Map<string, RemoteFile>;
-  toUpload: Map<string, TFile>;
+  toUpload: Map<string, LocalFileEntry>;
   toDeleteLocal: Set<string>;
   toDeleteRemote: Set<string>;
 }
@@ -47,6 +47,12 @@ interface PushResult {
   uploaded: number;
   deletedRemote: number;
   skipped: number;
+}
+
+interface LocalFileEntry {
+  path: string;
+  stat: { mtime: number; size: number };
+  readBinary: () => Promise<ArrayBuffer>;
 }
 
 class StaleRemoteHeadError extends Error {
@@ -108,14 +114,14 @@ export class SyncEngine {
       ".DS_Store",
       ".obsidian/plugins/vault-sync/data.json"
     ];
-    const ignorePatterns = [
-      ...ALWAYS_IGNORE,
-      ...(this.settings.ignorePatterns ?? [])
-    ];
+    const userIgnorePatterns = (this.settings.ignorePatterns ?? []).filter(
+      (pattern) => !isObsidianPattern(pattern)
+    );
+    const ignorePatterns = [...ALWAYS_IGNORE, ...userIgnorePatterns];
     const ignore = new IgnoreMatcher(ignorePatterns);
 
     const baseIndex = await this.indexStore.load();
-    const localFiles = this.collectLocalFiles(ignore);
+    const localFiles = await this.collectLocalFiles(ignore);
     const snapshot = await this.getRemoteSnapshot();
 
     const index = cloneIndexState(baseIndex);
@@ -145,14 +151,14 @@ export class SyncEngine {
       ".DS_Store",
       ".obsidian/plugins/vault-sync/data.json"
     ];
-    const ignorePatterns = [
-      ...ALWAYS_IGNORE,
-      ...(this.settings.ignorePatterns ?? [])
-    ];
+    const userIgnorePatterns = (this.settings.ignorePatterns ?? []).filter(
+      (pattern) => !isObsidianPattern(pattern)
+    );
+    const ignorePatterns = [...ALWAYS_IGNORE, ...userIgnorePatterns];
     const ignore = new IgnoreMatcher(ignorePatterns);
 
     const baseIndex = await this.indexStore.load();
-    const localFiles = this.collectLocalFiles(ignore);
+    const localFiles = await this.collectLocalFiles(ignore);
     let snapshot = await this.getRemoteSnapshot();
 
     let skipped = 0;
@@ -268,13 +274,13 @@ export class SyncEngine {
   private planSync(
     options: { allowPull: boolean; allowPush: boolean },
     index: SyncIndexState,
-    localFiles: Map<string, TFile>,
+    localFiles: Map<string, LocalFileEntry>,
     snapshot: RemoteSnapshot,
     ignore: IgnoreMatcher,
     now: number
   ): SyncPlan {
     const toDownload = new Map<string, RemoteFile>();
-    const toUpload = new Map<string, TFile>();
+    const toUpload = new Map<string, LocalFileEntry>();
     const toDeleteLocal = new Set<string>();
     const toDeleteRemote = new Set<string>();
 
@@ -300,7 +306,7 @@ export class SyncEngine {
       }
     };
 
-    const queueUpload = (file: TFile): void => {
+    const queueUpload = (file: LocalFileEntry): void => {
       const path = normalizeVaultPath(file.path);
       toDownload.delete(path);
       toDeleteLocal.delete(path);
@@ -440,6 +446,7 @@ export class SyncEngine {
       localMtime: number;
       blobSha: string;
     }> = [];
+    const invalidTreePaths: string[] = [];
 
     let skipped = 0;
 
@@ -449,6 +456,12 @@ export class SyncEngine {
       MAX_FILE_IO_CONCURRENCY,
       async (file) => {
         const filePath = normalizeVaultPath(file.path);
+        if (!isValidGitPath(filePath)) {
+          if (invalidTreePaths.length < 5) {
+            invalidTreePaths.push(filePath || file.path);
+          }
+          return { filePath, localMtime: file.stat.mtime, blobSha: null };
+        }
         const blobData = await this.readFileBinary(file, skippedFiles);
         if (!blobData) {
           return { filePath, localMtime: file.stat.mtime, blobSha: null };
@@ -479,12 +492,22 @@ export class SyncEngine {
     }
 
     for (const path of plan.toDeleteRemote.values()) {
+      if (!isValidGitPath(path)) {
+        if (invalidTreePaths.length < 5) {
+          invalidTreePaths.push(path);
+        }
+        continue;
+      }
       treeEntries.push({
         path,
         mode: "100644",
         type: "blob",
         sha: null
       });
+    }
+
+    if (invalidTreePaths.length > 0) {
+      console.warn("Vault Sync: skipped invalid tree paths", invalidTreePaths);
     }
 
     if (treeEntries.length === 0) {
@@ -535,19 +558,91 @@ export class SyncEngine {
     return { uploaded, deletedRemote, skipped };
   }
 
-  private collectLocalFiles(ignore: IgnoreMatcher): Map<string, TFile> {
-    const files = this.app.vault.getFiles();
-    const map = new Map<string, TFile>();
+  private async collectLocalFiles(
+    ignore: IgnoreMatcher
+  ): Promise<Map<string, LocalFileEntry>> {
+    const files = await this.listAllVaultFiles();
+    const candidates = files.filter((path) => !ignore.ignores(path));
+    const entries = await runWithConcurrency(
+      candidates,
+      MAX_FILE_IO_CONCURRENCY,
+      async (path) => this.buildLocalFileEntry(path)
+    );
 
-    for (const file of files) {
-      const path = normalizeVaultPath(file.path);
-      if (ignore.ignores(path)) {
+    const map = new Map<string, LocalFileEntry>();
+    for (const entry of entries) {
+      if (!entry) {
         continue;
       }
-      map.set(path, file);
+      map.set(entry.path, entry);
     }
 
     return map;
+  }
+
+  private async buildLocalFileEntry(
+    path: string
+  ): Promise<LocalFileEntry | null> {
+    const target = this.app.vault.getAbstractFileByPath(path);
+    if (target instanceof TFile) {
+      return {
+        path,
+        stat: { mtime: target.stat.mtime, size: target.stat.size },
+        readBinary: () => this.app.vault.readBinary(target)
+      };
+    }
+
+    const stat = await this.app.vault.adapter.stat(path);
+    if (!stat || stat.type !== "file") {
+      return null;
+    }
+
+    return {
+      path,
+      stat: { mtime: stat.mtime ?? 0, size: stat.size ?? 0 },
+      readBinary: () => this.app.vault.adapter.readBinary(path)
+    };
+  }
+
+  private async listAllVaultFiles(): Promise<string[]> {
+    const results: string[] = [];
+    const invalidPaths: string[] = [];
+    const pending: string[] = [""];
+
+    while (pending.length > 0) {
+      const current = pending.pop();
+      if (current === undefined) {
+        continue;
+      }
+
+      const listing = await this.app.vault.adapter.list(current);
+      for (const file of listing.files) {
+        const normalized = normalizeVaultPath(file);
+        if (!isValidGitPath(normalized)) {
+          if (invalidPaths.length < 5) {
+            invalidPaths.push(normalized || String(file));
+          }
+          continue;
+        }
+        results.push(normalized);
+      }
+      for (const folder of listing.folders) {
+        const normalized = normalizeVaultPath(folder);
+        if (!isValidGitPath(normalized)) {
+          if (invalidPaths.length < 5) {
+            invalidPaths.push(normalized || String(folder));
+          }
+          continue;
+        }
+        pending.push(normalized);
+      }
+    }
+
+    if (invalidPaths.length > 0) {
+      console.warn("Vault Sync: skipped invalid paths", invalidPaths);
+    }
+
+    return results;
   }
 
   private async getRemoteSnapshot(): Promise<RemoteSnapshot> {
@@ -596,7 +691,7 @@ export class SyncEngine {
   }
 
   private async readFileBinary(
-    file: TFile,
+    file: LocalFileEntry,
     skippedFiles: string[]
   ): Promise<ArrayBuffer | null> {
     if (file.stat.size > MAX_BLOB_BYTES) {
@@ -604,7 +699,7 @@ export class SyncEngine {
       return null;
     }
 
-    return this.app.vault.readBinary(file);
+    return file.readBinary();
   }
 
   private async ensureParentFolder(path: string): Promise<void> {
@@ -629,6 +724,21 @@ export class SyncEngine {
 
 function normalizeVaultPath(path: string): string {
   return path.replace(/\\/g, "/").replace(/^\//, "");
+}
+
+function isObsidianPattern(pattern: string): boolean {
+  return normalizeVaultPath(pattern).startsWith(".obsidian/");
+}
+
+function isValidGitPath(path: string): boolean {
+  if (!path) {
+    return false;
+  }
+  if (path.includes(":")) {
+    return false;
+  }
+  const parts = path.split("/");
+  return !parts.some((part) => part.length === 0 || part === "." || part === "..");
 }
 
 function base64ToArrayBuffer(base64: string): ArrayBuffer {

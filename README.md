@@ -229,6 +229,8 @@ The following paths are always excluded from sync, regardless of settings:
 > [!IMPORTANT]
 > `data.json` (the plugin's sync index and settings, including your token) is always excluded. It is **never uploaded to GitHub**.
 
+Everything else under `.obsidian/` is synced by default, including themes, plugins, snippets, and configuration JSON files.
+
 ### File Size Limit
 
 Files larger than **100 MB** are skipped and reported in the console. This matches GitHub's file size limit for the Git Data API. A warning notice is shown if any files are skipped during a sync.
