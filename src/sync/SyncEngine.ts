@@ -17,6 +17,7 @@ import { detectDeviceName } from "../main";
 
 const MAX_BLOB_BYTES = 100 * 1024 * 1024;
 const MAX_PUSH_RETRIES = 2;
+const MAX_FILE_IO_CONCURRENCY = 8;
 
 export interface SyncResult {
   uploaded: number;
@@ -183,23 +184,31 @@ export class SyncEngine {
         await this.indexStore.save(index);
       }
 
-      for (const remote of plan.toDownload.values()) {
-        if (remote.size > MAX_BLOB_BYTES) {
-          skipped += 1;
-          skippedFiles.push(remote.path);
-          continue;
+      const downloadTargets = Array.from(plan.toDownload.values());
+      const downloadResults = await runWithConcurrency(
+        downloadTargets,
+        MAX_FILE_IO_CONCURRENCY,
+        async (remote) => {
+          if (remote.size > MAX_BLOB_BYTES) {
+            skippedFiles.push(remote.path);
+            return { remote, file: null };
+          }
+          const file = await this.writeRemoteFile(remote);
+          return { remote, file };
         }
-        const file = await this.writeRemoteFile(remote);
-        if (!file) {
+      );
+
+      for (const result of downloadResults) {
+        if (!result.file) {
           skipped += 1;
           continue;
         }
 
-        const entry = ensureEntry(index, normalizeVaultPath(remote.path));
-        entry.remoteSha = remote.sha;
+        const entry = ensureEntry(index, normalizeVaultPath(result.remote.path));
+        entry.remoteSha = result.remote.sha;
         entry.lastRemoteCommitTime = snapshot.commitTime;
         entry.lastSynced = now;
-        entry.localMtime = file.stat.mtime;
+        entry.localMtime = result.file.stat.mtime;
         entry.deletedLocally = false;
         entry.localDeletedAt = undefined;
         downloaded += 1;
@@ -390,25 +399,38 @@ export class SyncEngine {
 
     let skipped = 0;
 
-    for (const file of plan.toUpload.values()) {
-      const filePath = normalizeVaultPath(file.path);
-      const blobData = await this.readFileBinary(file, skippedFiles);
-      if (!blobData) {
+    const uploadTargets = Array.from(plan.toUpload.values());
+    const uploadResults = await runWithConcurrency(
+      uploadTargets,
+      MAX_FILE_IO_CONCURRENCY,
+      async (file) => {
+        const filePath = normalizeVaultPath(file.path);
+        const blobData = await this.readFileBinary(file, skippedFiles);
+        if (!blobData) {
+          return { filePath, localMtime: file.stat.mtime, blobSha: null };
+        }
+
+        const blobSha = await this.client.createBinaryBlob(blobData);
+        return { filePath, localMtime: file.stat.mtime, blobSha };
+      }
+    );
+
+    for (const result of uploadResults) {
+      if (!result.blobSha) {
         skipped += 1;
         continue;
       }
 
-      const blobSha = await this.client.createBinaryBlob(blobData);
       treeEntries.push({
-        path: filePath,
+        path: result.filePath,
         mode: "100644",
         type: "blob",
-        sha: blobSha
+        sha: result.blobSha
       });
       pendingIndexUpdates.push({
-        path: filePath,
-        localMtime: file.stat.mtime,
-        blobSha
+        path: result.filePath,
+        localMtime: result.localMtime,
+        blobSha: result.blobSha
       });
     }
 
@@ -572,4 +594,37 @@ function cloneIndexState(index: SyncIndexState): SyncIndexState {
     entries[path] = { ...entry };
   }
   return { entries };
+}
+
+async function runWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  worker: (item: T) => Promise<R>
+): Promise<R[]> {
+  if (items.length === 0) {
+    return [];
+  }
+
+  const safeLimit = Math.max(1, limit);
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
+
+  const runWorker = async (): Promise<void> => {
+    while (true) {
+      const current = nextIndex;
+      if (current >= items.length) {
+        return;
+      }
+      nextIndex += 1;
+      results[current] = await worker(items[current]);
+    }
+  };
+
+  const workers = Array.from(
+    { length: Math.min(safeLimit, items.length) },
+    () => runWorker()
+  );
+
+  await Promise.all(workers);
+  return results;
 }
