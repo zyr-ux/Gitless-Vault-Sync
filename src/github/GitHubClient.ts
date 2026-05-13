@@ -328,22 +328,33 @@ export class GitHubClient {
       headers.Authorization = `Bearer ${this.token}`;
     }
 
-    const response = await fetch(url, {
-      method,
-      headers,
-      body: body ? JSON.stringify(body) : undefined,
-      cache: "no-store"
-    });
+    const payload = body ? JSON.stringify(body) : undefined;
+    let attempt = 0;
 
-    if (!response.ok) {
+    while (true) {
+      const response = await fetch(url, {
+        method,
+        headers,
+        body: payload,
+        cache: "no-store"
+      });
+
+      if (response.ok) {
+        if (response.status === 204) {
+          return undefined as T;
+        }
+        return (await response.json()) as T;
+      }
+
+      const retryDelay = getRetryDelayMs(response, attempt);
+      if (retryDelay !== null && attempt < MAX_REQUEST_RETRIES) {
+        attempt += 1;
+        await delay(retryDelay);
+        continue;
+      }
+
       await this.throwRequestError(response);
     }
-
-    if (response.status === 204) {
-      return undefined as T;
-    }
-
-    return (await response.json()) as T;
   }
 
   private async throwRequestError(response: Response): Promise<never> {
@@ -381,6 +392,55 @@ export class GitHubClient {
         : undefined
     });
   }
+}
+
+const MAX_REQUEST_RETRIES = 3;
+const MIN_RETRY_DELAY_MS = 1000;
+
+function getRetryDelayMs(response: Response, attempt: number): number | null {
+  const retryAfter = parseRetryAfterHeader(response.headers.get("retry-after"));
+  const resetAt = parseRateLimitResetHeader(
+    response.headers.get("x-ratelimit-reset")
+  );
+
+  if (response.status === 429) {
+    if (retryAfter !== null) {
+      return Math.max(MIN_RETRY_DELAY_MS, retryAfter * 1000);
+    }
+    return Math.max(MIN_RETRY_DELAY_MS, 1000 * Math.pow(2, attempt));
+  }
+
+  if (response.status === 403 && (retryAfter !== null || resetAt !== null)) {
+    if (retryAfter !== null) {
+      return Math.max(MIN_RETRY_DELAY_MS, retryAfter * 1000);
+    }
+    if (resetAt !== null) {
+      const delayMs = resetAt * 1000 - Date.now();
+      return Math.max(MIN_RETRY_DELAY_MS, delayMs);
+    }
+  }
+
+  return null;
+}
+
+function parseRetryAfterHeader(value: string | null): number | null {
+  if (!value) {
+    return null;
+  }
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parseRateLimitResetHeader(value: string | null): number | null {
+  if (!value) {
+    return null;
+  }
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 function normalizePathPrefix(prefix: string): string {
