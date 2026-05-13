@@ -1,0 +1,145 @@
+name: Release
+
+# Trigger on version tags like v1.0.0, v1.2.3, etc.
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+# Grant write access so the action can push the version-bump commit
+# and create a GitHub Release with assets.
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 1. Checkout ────────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # Full history so we can push back to the branch
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── 2. Node.js setup ───────────────────────────────────────────────────
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # ── 3. Parse the tag into a bare version number ────────────────────────
+      #       Tag:     v1.0.0   →  TAG=v1.0.0
+      #       Version: 1.0.0    →  VERSION=1.0.0  (no "v" prefix — Obsidian reads this)
+      - name: Extract version from tag
+        id: version
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          echo "tag=$TAG"         >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Resolved tag=$TAG  version=$VERSION"
+
+      # ── 4. Bump versions in all three files ────────────────────────────────
+      #       • manifest.json  → "version" field
+      #       • package.json   → "version" field
+      #       • versions.json  → appends  "1.0.0": "<minAppVersion>" entry
+      #         (minAppVersion is inherited from the current manifest.json value)
+      - name: Bump version in manifest.json, package.json, and versions.json
+        env:
+          NEW_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # Read the current minAppVersion from manifest.json before touching it
+          MIN_APP_VERSION=$(node -e "
+            const m = require('./manifest.json');
+            process.stdout.write(m.minAppVersion);
+          ")
+          echo "minAppVersion=$MIN_APP_VERSION"
+
+          # Update manifest.json
+          node -e "
+            const fs = require('fs');
+            const m = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
+            m.version = process.env.NEW_VERSION;
+            fs.writeFileSync('manifest.json', JSON.stringify(m, null, 2) + '\n');
+          "
+
+          # Update package.json
+          node -e "
+            const fs = require('fs');
+            const p = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            p.version = process.env.NEW_VERSION;
+            fs.writeFileSync('package.json', JSON.stringify(p, null, 2) + '\n');
+          "
+
+          # Append new entry to versions.json
+          node -e "
+            const fs = require('fs');
+            const v = JSON.parse(fs.readFileSync('versions.json', 'utf8'));
+            v[process.env.NEW_VERSION] = '$MIN_APP_VERSION';
+            fs.writeFileSync('versions.json', JSON.stringify(v, null, 2) + '\n');
+          "
+
+      # ── 5. Commit the version bumps back to the default branch ─────────────
+      #       NOTE: If your default branch is not "main", change the last line.
+      - name: Commit and push version bumps
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add manifest.json package.json versions.json
+          git commit -m "workflow: bumped version to ${{ steps.version.outputs.version }}"
+          git push origin HEAD:main
+
+      # ── 6. Install dependencies ────────────────────────────────────────────
+      - name: Install dependencies
+        run: npm ci
+
+      # ── 7. Build ───────────────────────────────────────────────────────────
+      #       Produces main.js in the project root (see esbuild.config.mjs)
+      - name: Build plugin
+        run: npm run build
+
+      # ── 8. Package the release zip ─────────────────────────────────────────
+      #       Structure inside the zip:
+      #         vault-sync/
+      #           ├── main.js
+      #           ├── manifest.json
+      #           ├── styles.css
+      #           └── versions.json
+      #
+      #       Users extract this zip into their .obsidian/plugins/ folder.
+      - name: Package release zip
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          FOLDER="vault-sync"
+          ZIP_NAME="Vault-Sync-${TAG}.zip"
+
+          mkdir -p "$FOLDER"
+          cp main.js       "$FOLDER/"
+          cp manifest.json "$FOLDER/"
+          cp styles.css    "$FOLDER/"
+          cp versions.json "$FOLDER/"
+
+          zip -r "$ZIP_NAME" "$FOLDER"
+          echo "zip_name=$ZIP_NAME" >> "$GITHUB_ENV"
+
+      # ── 9. Create GitHub Release and attach the zip ────────────────────────
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "Vault Sync ${{ steps.version.outputs.tag }}"
+          body: |
+            ## Installation
+
+            1. Download `Vault-Sync-${{ steps.version.outputs.tag }}.zip` below
+            2. Extract the `vault-sync` folder into your vault's `.obsidian/plugins/` directory
+            3. Reload Obsidian and enable **Vault Sync** under Settings → Community Plugins
+
+            > If you are updating from a previous version, replace the existing `vault-sync` folder contents and reload Obsidian.
+          files: Vault-Sync-${{ steps.version.outputs.tag }}.zip
+          draft: false
+          prerelease: false
