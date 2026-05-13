@@ -4,7 +4,7 @@ import {
   VaultSyncSettingTab,
   type VaultSyncSettings
 } from "./settings";
-import { normalizePluginData } from "./sync/IndexStore";
+import { ensureEntry, normalizePluginData } from "./sync/IndexStore";
 import { GitHubApiError, GitHubClient } from "./github/GitHubClient";
 import { IndexStore } from "./sync/IndexStore";
 import { SyncEngine, type SyncResult } from "./sync/SyncEngine";
@@ -122,6 +122,7 @@ export default class VaultSyncPlugin extends Plugin {
       this.app.vault.on("delete", (file) => {
         if (file instanceof TFile) {
           this.schedulePush();
+          void this.markDeleted(file);
         }
       })
     );
@@ -314,6 +315,19 @@ export default class VaultSyncPlugin extends Plugin {
     settings.openTabById(this.manifest.id);
   }
 
+  private async markDeleted(file: TFile): Promise<void> {
+    if (!this.indexStore) {
+      return;
+    }
+
+    const index = await this.indexStore.load();
+    const path = normalizeVaultPath(file.path);
+    const entry = ensureEntry(index, path);
+    entry.deletedLocally = true;
+    entry.localDeletedAt = Date.now();
+    await this.indexStore.save(index);
+  }
+
   private showSyncNotice(result: SyncResult, mode: SyncMode): void {
     const changes =
       result.uploaded +
@@ -371,6 +385,10 @@ function mergeModes(current: SyncMode | null, next: SyncMode): SyncMode {
     return "sync";
   }
   return current;
+}
+
+function normalizeVaultPath(path: string): string {
+  return path.replace(/\\/g, "/").replace(/^\//, "");
 }
 
 export function detectDeviceName(): string {
