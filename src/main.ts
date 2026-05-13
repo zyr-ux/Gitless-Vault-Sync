@@ -254,10 +254,22 @@ export default class VaultSyncPlugin extends Plugin {
         result = await this.syncEngine.sync();
       }
 
+      const hadSpinner = !!this.syncingNotice;
+      this.hideSyncingNotice();
+      if (hadSpinner) {
+        await new Promise((resolve) => window.setTimeout(resolve, 400));
+      }
+
       if (shouldNotify) {
         this.showSyncNotice(result, mode);
       }
     } catch (error) {
+      const hadSpinner = !!this.syncingNotice;
+      this.hideSyncingNotice();
+      if (hadSpinner) {
+        await new Promise((resolve) => window.setTimeout(resolve, 400));
+      }
+
       console.error("Vault Sync error details:", error);
       if (error instanceof GitHubApiError) {
         this.showNotice(`Sync failed: ${this.formatGitHubError(error)}`, "ERROR", 10000);

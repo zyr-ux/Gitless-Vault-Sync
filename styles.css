@@ -34,7 +34,7 @@ This CSS file is loaded when the plugin is enabled.
   gap: 8px;
 }
 
-.vault-sync-spinner::before {
+.vault-sync-spinner::after {
   content: "";
   width: 12px;
   height: 12px;
