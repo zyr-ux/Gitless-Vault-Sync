@@ -31,6 +31,7 @@ export const DEFAULT_SETTINGS: VaultSyncSettings = {
   ignorePatterns: [
     ".obsidian/workspace",
     ".obsidian/workspace.json",
+    ".obsidian/workspace-mobile.json",
     ".obsidian/cache",
     ".obsidian/logs",
     ".obsidian/plugins",
