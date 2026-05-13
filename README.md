@@ -28,6 +28,7 @@ Vault Sync is an Obsidian community plugin that syncs your vault to a private or
   - [Ignored Files](#ignored-files)
   - [File Size Limit](#file-size-limit)
 - [Limitations](#limitations)
+- [Contributing](#contributing)
 - [Acknowledgements](#acknowledgements)
 
 ---
@@ -88,16 +89,22 @@ Vault Sync authenticates with GitHub using a **Fine-grained Personal Access Toke
 
 ### 3. Install the Plugin
 
-Since this plugin is not yet on the Obsidian community plugin directory, install it manually:
+Since this plugin is not yet on the Obsidian community plugin directory, install it manually via the GitHub Releases page:
 
-1. Download `main.js`, `manifest.json`, and `styles.css` from the latest release
-2. In your vault, navigate to `.obsidian/plugins/`
-3. Create a new folder named `vault-sync`
-4. Place the three downloaded files inside it
+1. Go to the [**Releases**](../../releases/latest) page of this repository
+2. Under the latest release, download `Vault-Sync-vX.X.X.zip`
+3. Extract the zip — you will get a folder named `vault-sync`
+4. Move the `vault-sync` folder into `.obsidian/plugins/` inside your vault
 5. In Obsidian, go to **Settings → Community plugins → Installed plugins** and enable **Vault Sync**
 
 > [!NOTE]
 > You may need to enable **Community plugins** first under Settings → Community plugins → Turn on community plugins.
+
+**Updating to a newer version:**
+
+1. Download the new `Vault-Sync-vX.X.X.zip` from the Releases page
+2. Extract it and replace the contents of your existing `vault-sync` folder
+3. Reload Obsidian (or disable and re-enable the plugin)
 
 ### 4. Configure the Plugin
 
@@ -226,6 +233,21 @@ Files larger than **100 MB** are skipped and reported in the console. This match
 - **No binary diff** — binary files are uploaded as full blobs each time they change
 - **GitHub only** — the plugin is designed specifically for the GitHub REST API; other hosts are not supported
 - **Rate limits** — GitHub API rate limits apply. Large vaults or very frequent syncs may hit them. Vault Sync reports the reset time in the notice when this happens.
+
+---
+
+## Contributing
+
+Contributions are welcome! Before opening a pull request, please read [**CONTRIBUTING.md**](CONTRIBUTING.md) for:
+
+- Local development setup and build instructions
+- Coding conventions and naming rules
+- Commit message format
+- What must never be changed (version files, `main.js`, etc.)
+
+For a deep-dive into how the plugin is structured internally, see [**ARCHITECTURE.md**](ARCHITECTURE.md).
+
+If you are using an AI coding agent to contribute, it should read [**AGENTS.md**](AGENTS.md) first — it contains hard rules specific to this codebase.
 
 ---
 
