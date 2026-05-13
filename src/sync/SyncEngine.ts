@@ -84,7 +84,7 @@ export class SyncEngine {
       ".obsidian/plugins/vault-sync/data.json"
     ];
     const ignore = new IgnoreMatcher(ALWAYS_IGNORE);
-    
+
     const index = await this.indexStore.load();
     const localFiles = this.collectLocalFiles(ignore);
     let snapshot = await this.getRemoteSnapshot();
@@ -326,9 +326,8 @@ export class SyncEngine {
           treeEntries
         );
         const parents = snapshot.commitSha ? [snapshot.commitSha] : [];
-        const message = `vault-sync: edited by ${
-          this.settings.deviceName || detectDeviceName()
-        }`;
+        const message = `Vault Sync : edited by ${this.settings.deviceName || detectDeviceName()
+          }`;
         const commitSha = await this.client.createCommit(
           message,
           treeSha,

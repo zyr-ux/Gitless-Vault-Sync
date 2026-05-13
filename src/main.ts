@@ -375,38 +375,31 @@ function mergeModes(current: SyncMode | null, next: SyncMode): SyncMode {
 }
 
 export function detectDeviceName(): string {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const os = require("os");
-    const hostname = os.hostname();
-    if (hostname) {
-      return hostname;
+  // Mobile: use Obsidian's Platform API for reliable detection.
+  // isIosApp is true on both iPhone and iPad (same app).
+  if (Platform.isAndroidApp) return "Android";
+  if (Platform.isIosApp) return "iOS";
+
+  // Desktop: try to get the real hostname via Node.js.
+  if (Platform.isDesktop) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const os = require("os");
+      const hostname = os.hostname();
+      if (hostname) {
+        return hostname;
+      }
+    } catch (_) {
+      // Fall through to UA detection
     }
-  } catch (e) {
-    // Ignore and fall back to navigator
-  }
 
-  if (typeof navigator === "undefined") {
-    return "Device";
-  }
-
-  const ua = navigator.userAgent || "";
-  const platform = navigator.platform || "";
-
-  if (/Android/i.test(ua)) {
-    return "Android";
-  }
-  if (/iPhone|iPad|iPod/i.test(ua)) {
-    return "iOS";
-  }
-  if (/Win/i.test(platform)) {
-    return "Windows";
-  }
-  if (/Mac/i.test(platform)) {
-    return "macOS";
-  }
-  if (/Linux/i.test(platform)) {
-    return "Linux";
+    // UA fallback for desktop if hostname is unavailable.
+    if (typeof navigator !== "undefined") {
+      const ua = navigator.userAgent || "";
+      if (/Win/i.test(ua)) return "Windows";
+      if (/Mac/i.test(ua)) return "macOS";
+      if (/Linux/i.test(ua)) return "Linux";
+    }
   }
 
   return "Device";
