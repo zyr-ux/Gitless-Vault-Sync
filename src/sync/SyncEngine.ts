@@ -33,6 +33,7 @@ interface RemoteSnapshot {
   commitTime: number;
   treeSha: string;
   files: RemoteFile[];
+  serverTimeMs: number;
 }
 
 interface SyncPlan {
@@ -289,6 +290,8 @@ export class SyncEngine {
       }
     };
 
+    const clockSkewMs = now - snapshot.serverTimeMs;
+
     for (const [path, entry] of Object.entries(index.entries)) {
       if (ignore.ignores(path)) {
         continue;
@@ -320,8 +323,9 @@ export class SyncEngine {
 
         const remoteChanged = entry.remoteSha !== remote.sha;
         const deleteTime = entry.localDeletedAt ?? now;
+        const adjustedDeleteTime = deleteTime - clockSkewMs;
 
-        if (remoteChanged && snapshot.commitTime > deleteTime) {
+        if (remoteChanged && snapshot.commitTime > adjustedDeleteTime) {
           entry.deletedLocally = false;
           entry.localDeletedAt = undefined;
           queueDownload(remote);
@@ -335,7 +339,8 @@ export class SyncEngine {
       const remoteChanged = entry.remoteSha !== remote.sha;
 
       if (remoteChanged && localChanged) {
-        if (local.stat.mtime >= snapshot.commitTime) {
+        const adjustedLocalMtime = local.stat.mtime - clockSkewMs;
+        if (adjustedLocalMtime >= snapshot.commitTime) {
           queueUpload(local);
         } else {
           queueDownload(remote);
@@ -358,10 +363,13 @@ export class SyncEngine {
       if (!entry) {
         if (!local) {
           queueDownload(remote);
-        } else if (local.stat.mtime >= snapshot.commitTime) {
-          queueUpload(local);
         } else {
-          queueDownload(remote);
+          const adjustedLocalMtime = local.stat.mtime - clockSkewMs;
+          if (adjustedLocalMtime >= snapshot.commitTime) {
+            queueUpload(local);
+          } else {
+            queueDownload(remote);
+          }
         }
       }
     }
@@ -508,13 +516,21 @@ export class SyncEngine {
 
   private async getRemoteSnapshot(): Promise<RemoteSnapshot> {
     try {
-      return await this.client.getLatestSnapshot();
+      const snapshot = await this.client.getLatestSnapshot();
+      const serverTimeMs = this.client.getLastServerTimeMs() ?? Date.now();
+      return { ...snapshot, serverTimeMs };
     } catch (error) {
       if (
         error instanceof GitHubApiError &&
         (error.status === 404 || error.status === 409)
       ) {
-        return { commitSha: "", commitTime: 0, treeSha: "", files: [] };
+        return {
+          commitSha: "",
+          commitTime: 0,
+          treeSha: "",
+          files: [],
+          serverTimeMs: Date.now()
+        };
       }
       throw error;
     }

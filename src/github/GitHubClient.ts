@@ -77,6 +77,7 @@ export class GitHubClient {
   private pathPrefix: string;
   private apiBaseUrl: string;
   private cachedOwner?: string;
+  private lastServerTimeMs?: number;
 
   constructor(options: GitHubClientOptions) {
     this.token = options.token;
@@ -107,6 +108,10 @@ export class GitHubClient {
     if (options.apiBaseUrl !== undefined) {
       this.apiBaseUrl = options.apiBaseUrl;
     }
+  }
+
+  getLastServerTimeMs(): number | null {
+    return this.lastServerTimeMs ?? null;
   }
 
   async getBranchRef(): Promise<string> {
@@ -339,6 +344,11 @@ export class GitHubClient {
         cache: "no-store"
       });
 
+      const serverTimeMs = parseServerTimeMs(response.headers.get("date"));
+      if (serverTimeMs !== null) {
+        this.lastServerTimeMs = serverTimeMs;
+      }
+
       if (response.ok) {
         if (response.status === 204) {
           return undefined as T;
@@ -436,6 +446,14 @@ function parseRateLimitResetHeader(value: string | null): number | null {
     return null;
   }
   const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parseServerTimeMs(value: string | null): number | null {
+  if (!value) {
+    return null;
+  }
+  const parsed = Date.parse(value);
   return Number.isFinite(parsed) ? parsed : null;
 }
 
