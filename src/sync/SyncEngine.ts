@@ -93,6 +93,42 @@ export class SyncEngine {
     return this.runSync({ allowPull: false, allowPush: true });
   }
 
+  async hasPendingChanges(options: {
+    allowPull: boolean;
+    allowPush: boolean;
+  }): Promise<boolean> {
+    const now = Date.now();
+    const ALWAYS_IGNORE = [
+      ".obsidian/workspace",
+      ".obsidian/workspace.json",
+      ".obsidian/workspace-mobile.json",
+      ".obsidian/cache",
+      ".obsidian/logs",
+      ".trash",
+      ".DS_Store",
+      ".obsidian/plugins/vault-sync/data.json"
+    ];
+    const ignorePatterns = [
+      ...ALWAYS_IGNORE,
+      ...(this.settings.ignorePatterns ?? [])
+    ];
+    const ignore = new IgnoreMatcher(ignorePatterns);
+
+    const baseIndex = await this.indexStore.load();
+    const localFiles = this.collectLocalFiles(ignore);
+    const snapshot = await this.getRemoteSnapshot();
+
+    const index = cloneIndexState(baseIndex);
+    const plan = this.planSync(options, index, localFiles, snapshot, ignore, now);
+
+    return (
+      plan.toDownload.size > 0 ||
+      plan.toUpload.size > 0 ||
+      plan.toDeleteLocal.size > 0 ||
+      plan.toDeleteRemote.size > 0
+    );
+  }
+
   private async runSync(options: {
     allowPull: boolean;
     allowPush: boolean;

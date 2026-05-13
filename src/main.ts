@@ -26,6 +26,7 @@ export default class VaultSyncPlugin extends Plugin {
   private pendingMode: SyncMode | null = null;
   private pendingNotice = false;
   private lastForegroundSyncAt = 0;
+  private syncingNotice?: Notice;
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -236,6 +237,13 @@ export default class VaultSyncPlugin extends Plugin {
     this.pendingNotice = false;
     this.syncInFlight = true;
 
+    if (shouldNotify && Platform.isDesktop) {
+      const shouldShowSpinner = await this.shouldShowSyncSpinner(mode);
+      if (shouldShowSpinner) {
+        this.showSyncingNotice();
+      }
+    }
+
     try {
       let result: SyncResult;
       if (mode === "pull") {
@@ -258,6 +266,7 @@ export default class VaultSyncPlugin extends Plugin {
         this.showNotice(`Sync failed: ${msg}`, "ERROR", 10000);
       }
     } finally {
+      this.hideSyncingNotice();
       this.syncInFlight = false;
       if (this.pendingMode) {
         void this.runNextSync();
@@ -314,6 +323,51 @@ export default class VaultSyncPlugin extends Plugin {
 
     const text = message instanceof Error ? message.message : String(message);
     new Notice(text, timeout);
+  }
+
+  private showSyncingNotice(): void {
+    if (!Platform.isDesktop || this.syncingNotice) {
+      return;
+    }
+
+    const notice = new Notice("Syncing notes", 0);
+    const noticeEl = (notice as { noticeEl?: HTMLElement }).noticeEl;
+    if (noticeEl) {
+      noticeEl.addClass("vault-sync-spinner");
+    }
+    this.syncingNotice = notice;
+  }
+
+  private hideSyncingNotice(): void {
+    if (!this.syncingNotice) {
+      return;
+    }
+
+    const notice = this.syncingNotice as unknown as { hide?: () => void };
+    if (typeof notice.hide === "function") {
+      notice.hide();
+    }
+    this.syncingNotice = undefined;
+  }
+
+  private async shouldShowSyncSpinner(mode: SyncMode): Promise<boolean> {
+    if (!this.syncEngine) {
+      return true;
+    }
+
+    const options =
+      mode === "pull"
+        ? { allowPull: true, allowPush: false }
+        : mode === "push"
+          ? { allowPull: false, allowPush: true }
+          : { allowPull: true, allowPush: true };
+
+    try {
+      return await this.syncEngine.hasPendingChanges(options);
+    } catch (error) {
+      console.warn("Failed to preflight sync changes", error);
+      return true;
+    }
   }
 
   private registerCommands(): void {
