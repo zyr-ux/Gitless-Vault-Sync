@@ -159,6 +159,10 @@ export class SyncEngine {
       }
     }
 
+    if (options.allowPush && (uploaded > 0 || deletedRemote > 0)) {
+      await this.indexStore.save(index);
+    }
+
     let downloaded = 0;
     let deletedLocal = 0;
     if (options.allowPull) {
@@ -169,6 +173,10 @@ export class SyncEngine {
           deletedLocal += 1;
         }
         removeEntry(index, path);
+      }
+
+      if (deletedLocal > 0) {
+        await this.indexStore.save(index);
       }
 
       for (const remote of plan.toDownload.values()) {
@@ -191,6 +199,7 @@ export class SyncEngine {
         entry.deletedLocally = false;
         entry.localDeletedAt = undefined;
         downloaded += 1;
+        await this.indexStore.save(index);
       }
     }
 
