@@ -496,7 +496,7 @@ export class SyncEngine {
       treeEntries
     );
     const parents = snapshot.commitSha ? [snapshot.commitSha] : [];
-    const message = `Vault Sync : edited by ${this.settings.deviceName || detectDeviceName()
+    const message = `Vault Sync: edited by ${this.settings.deviceName || detectDeviceName()
       }`;
     const commitSha = await this.client.createCommit(message, treeSha, parents);
 

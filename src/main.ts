@@ -467,7 +467,7 @@ export default class VaultSyncPlugin extends Plugin {
     }
 
     if (changes === 0 && result.skipped === 0) {
-      this.showNotice(`Vault Sync : No changes.`, "INFO");
+      this.showNotice(`Vault Sync: No changes.`, "INFO");
       return;
     }
 
@@ -476,11 +476,11 @@ export default class VaultSyncPlugin extends Plugin {
         console.warn("Vault Sync skipped files:", result.skippedFiles);
       }
       this.showNotice(
-        `Vault Sync : Sync successful (${result.skipped} files skipped).`,
+        `Vault Sync: Sync successful (${result.skipped} files skipped).`,
         severity
       );
     } else {
-      this.showNotice(`Vault Sync : Sync successful.`, severity);
+      this.showNotice(`Vault Sync: Sync successful.`, severity);
     }
   }
 
