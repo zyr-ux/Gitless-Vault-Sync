@@ -478,9 +478,13 @@ function parseCommitTime(commit: GitCommitResponse): number {
 
 function arrayBufferToBase64(data: ArrayBuffer): string {
   const bytes = new Uint8Array(data);
-  let binary = "";
-  for (let i = 0; i < bytes.length; i += 1) {
-    binary += String.fromCharCode(bytes[i]);
+  const chunkSize = 0x8000;
+  const parts: string[] = [];
+
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    parts.push(String.fromCharCode(...chunk));
   }
-  return btoa(binary);
+
+  return btoa(parts.join(""));
 }
