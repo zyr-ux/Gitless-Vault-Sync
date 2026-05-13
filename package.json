@@ -1,6 +1,6 @@
 {
   "name": "vault-sync",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Obsidian plugin to sync a vault with GitHub via REST API.",
   "main": "main.js",
   "scripts": {
