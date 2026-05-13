@@ -12,6 +12,8 @@ import { SyncEngine, type SyncResult } from "./sync/SyncEngine";
 type SyncMode = "pull" | "push" | "sync";
 type NoticeSeverity = "INFO" | "WARNING" | "ERROR";
 
+const FOREGROUND_SYNC_COOLDOWN_MS = 15000;
+
 export default class VaultSyncPlugin extends Plugin {
   settings!: VaultSyncSettings;
   private githubClient?: GitHubClient;
@@ -23,6 +25,7 @@ export default class VaultSyncPlugin extends Plugin {
   private syncInFlight = false;
   private pendingMode: SyncMode | null = null;
   private pendingNotice = false;
+  private lastForegroundSyncAt = 0;
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -149,6 +152,26 @@ export default class VaultSyncPlugin extends Plugin {
         }
       })
     );
+
+    this.registerEvent(
+      this.app.workspace.on("active-leaf-change", () => {
+        this.requestForegroundPull();
+      })
+    );
+  }
+
+  private requestForegroundPull(): void {
+    if (!this.shouldAutoPull() || !this.isConfigured()) {
+      return;
+    }
+
+    const now = Date.now();
+    if (now - this.lastForegroundSyncAt < FOREGROUND_SYNC_COOLDOWN_MS) {
+      return;
+    }
+
+    this.lastForegroundSyncAt = now;
+    this.requestSync("pull");
   }
 
   private startAutoPull(): void {
