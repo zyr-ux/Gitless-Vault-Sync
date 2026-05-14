@@ -54,6 +54,9 @@ export default class VaultSyncPlugin extends Plugin {
     this.startAutoPull();
     if (this.settings.syncOnStart) {
       this.requestSync("pull");
+    } else {
+      // Suppression of the immediate foreground pull from the initial active-leaf-change event.
+      this.lastForegroundSyncAt = Date.now();
     }
   }
 
