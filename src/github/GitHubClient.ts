@@ -1,3 +1,5 @@
+import { requestUrl } from "obsidian";
+
 export type GitObjectType = "blob" | "tree";
 
 export interface GitTreeItem {
@@ -302,6 +304,47 @@ export class GitHubClient {
     );
   }
 
+  async downloadRepositoryArchive(): Promise<ArrayBuffer> {
+    const owner = await this.getOwner();
+    const url = `${this.apiBaseUrl}/repos/${owner}/${this.repo}/zipball/${encodeURIComponent(this.branch)}`;
+    const headers: Record<string, string> = {
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28"
+    };
+
+    if (this.token) {
+      headers.Authorization = `Bearer ${this.token}`;
+    }
+
+    let attempt = 0;
+    while (true) {
+      const response = await requestUrl({
+        url,
+        method: "GET",
+        headers,
+        throw: false
+      });
+
+      const serverTimeMs = parseServerTimeMs(response.headers["date"]);
+      if (serverTimeMs !== null) {
+        this.lastServerTimeMs = serverTimeMs;
+      }
+
+      if (response.status >= 200 && response.status < 300) {
+        return response.arrayBuffer;
+      }
+
+      const retryDelay = getRetryDelayMsFromHeaders(response.headers, response.status, attempt);
+      if (retryDelay !== null && attempt < MAX_REQUEST_RETRIES) {
+        attempt += 1;
+        await delay(retryDelay);
+        continue;
+      }
+
+      await this.throwRequestUrlError(response);
+    }
+  }
+
   private async getOwner(): Promise<string> {
     if (this.owner) {
       return this.owner;
@@ -359,58 +402,59 @@ export class GitHubClient {
     let attempt = 0;
 
     while (true) {
-      const response = await fetch(url, {
+      const response = await requestUrl({
+        url,
         method,
         headers,
         body: payload,
-        cache: "no-store"
+        throw: false
       });
 
-      const serverTimeMs = parseServerTimeMs(response.headers.get("date"));
+      const serverTimeMs = parseServerTimeMs(response.headers["date"]);
       if (serverTimeMs !== null) {
         this.lastServerTimeMs = serverTimeMs;
       }
 
-      if (response.ok) {
+      if (response.status >= 200 && response.status < 300) {
         if (response.status === 204) {
           return undefined as T;
         }
-        return (await response.json()) as T;
+        return response.json as T;
       }
 
-      const retryDelay = getRetryDelayMs(response, attempt);
+      const retryDelay = getRetryDelayMsFromHeaders(response.headers, response.status, attempt);
       if (retryDelay !== null && attempt < MAX_REQUEST_RETRIES) {
         attempt += 1;
         await delay(retryDelay);
         continue;
       }
 
-      await this.throwRequestError(response);
+      await this.throwRequestUrlError(response);
     }
   }
 
-  private async throwRequestError(response: Response): Promise<never> {
+  private async throwRequestUrlError(response: { status: number; headers: Record<string, string>; json: any; text: string }): Promise<never> {
     let message = `GitHub API error (${response.status})`;
-    const contentType = response.headers.get("content-type") ?? "";
+    const contentType = response.headers["content-type"] ?? "";
     if (contentType.includes("application/json")) {
-      const payload = (await response.json()) as { message?: string };
-      if (payload.message) {
+      const payload = response.json as { message?: string };
+      if (payload && payload.message) {
         message = payload.message;
       }
     } else {
-      const text = await response.text();
+      const text = response.text;
       if (text) {
         message = text;
       }
     }
 
-    const requestId = response.headers.get("x-github-request-id") ?? undefined;
+    const requestId = response.headers["x-github-request-id"] ?? undefined;
     const retryAfter = parseInt(
-      response.headers.get("retry-after") ?? "",
+      response.headers["retry-after"] ?? "",
       10
     );
     const rateLimitReset = parseInt(
-      response.headers.get("x-ratelimit-reset") ?? "",
+      response.headers["x-ratelimit-reset"] ?? "",
       10
     );
 
@@ -436,20 +480,20 @@ export class GitHubClient {
 const MAX_REQUEST_RETRIES = 3;
 const MIN_RETRY_DELAY_MS = 1000;
 
-function getRetryDelayMs(response: Response, attempt: number): number | null {
-  const retryAfter = parseRetryAfterHeader(response.headers.get("retry-after"));
+function getRetryDelayMsFromHeaders(headers: Record<string, string>, status: number, attempt: number): number | null {
+  const retryAfter = parseRetryAfterHeader(headers["retry-after"]);
   const resetAt = parseRateLimitResetHeader(
-    response.headers.get("x-ratelimit-reset")
+    headers["x-ratelimit-reset"]
   );
 
-  if (response.status === 429) {
+  if (status === 429) {
     if (retryAfter !== null) {
       return Math.max(MIN_RETRY_DELAY_MS, retryAfter * 1000);
     }
     return Math.max(MIN_RETRY_DELAY_MS, 1000 * Math.pow(2, attempt));
   }
 
-  if (response.status === 403 && (retryAfter !== null || resetAt !== null)) {
+  if (status === 403 && (retryAfter !== null || resetAt !== null)) {
     if (retryAfter !== null) {
       return Math.max(MIN_RETRY_DELAY_MS, retryAfter * 1000);
     }

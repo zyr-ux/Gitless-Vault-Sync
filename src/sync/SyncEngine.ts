@@ -14,6 +14,7 @@ import {
 } from "./IndexStore";
 import type { VaultSyncSettings } from "../settings";
 import { detectDeviceName } from "../main";
+import { BlobReader, ZipReader, Uint8ArrayWriter } from "@zip.js/zip.js";
 
 const MAX_BLOB_BYTES = 100 * 1024 * 1024;
 const MAX_PUSH_RETRIES = 2;
@@ -217,6 +218,23 @@ export class SyncEngine {
         }
       }
 
+      // High-efficiency ZIP initial sync detection
+      const hasUserFiles = Array.from(localFiles.keys()).some(
+        (p) => !p.startsWith(".obsidian/")
+      );
+
+      if (
+        options.allowPull &&
+        Object.keys(baseIndex.entries).length === 0 &&
+        !hasUserFiles &&
+        snapshot.files.length > 50
+      ) {
+        console.warn(
+          `[Sync] Detected vault with only configuration files and non-empty remote (${snapshot.files.length} files). Performing ZIP-based initial sync.`
+        );
+        return this.performZipInitialSync(snapshot, baseIndex, ignore);
+      }
+
       // Update the base index with the latest remote head we just found
       if (snapshot.commitSha) {
         baseIndex.lastKnownRemoteHeadSha = snapshot.commitSha;
@@ -329,6 +347,82 @@ export class SyncEngine {
         skippedFiles
       };
     });
+  }
+
+  private async performZipInitialSync(
+    snapshot: RemoteSnapshot,
+    index: SyncIndexState,
+    ignore: IgnoreMatcher
+  ): Promise<SyncResult> {
+    const zipData = await this.client.downloadRepositoryArchive();
+    const zipBlob = new Blob([zipData]);
+    const reader = new ZipReader(new BlobReader(zipBlob));
+    const entries = await reader.getEntries();
+
+    let downloaded = 0;
+    const now = Date.now();
+
+    const remoteMap = new Map<string, RemoteFile>(
+      snapshot.files.map((f) => [normalizeVaultPath(f.path), f])
+    );
+
+    for (const entry of entries) {
+      if (entry.directory || !entry.getData) {
+        continue;
+      }
+
+      // GitHub ZIPs have a root folder segment like "owner-repo-sha/"
+      const parts = entry.filename.split("/");
+      if (parts.length <= 1) {
+        continue;
+      }
+      const path = parts.slice(1).join("/");
+
+      const normalizedPath = normalizeVaultPath(path);
+      if (ignore.ignores(normalizedPath)) {
+        continue;
+      }
+
+      await this.ensureParentFolder(normalizedPath);
+
+      const writer = new Uint8ArrayWriter();
+      await entry.getData(writer);
+      const data = await writer.getData();
+
+      // Obsidian createBinary expects ArrayBuffer
+      await this.app.vault.adapter.writeBinary(normalizedPath, data.buffer);
+
+      const remote = remoteMap.get(normalizedPath);
+      if (remote) {
+        const entryRecord = ensureEntry(index, normalizedPath);
+        entryRecord.remoteSha = remote.sha;
+        entryRecord.localHash = remote.sha;
+        entryRecord.size = remote.size;
+        entryRecord.lastSynced = now;
+        entryRecord.lastRemoteCommitTime = snapshot.commitTime;
+
+        const stat = await this.app.vault.adapter.stat(normalizedPath);
+        entryRecord.localMtime = stat?.mtime ?? now;
+      }
+      downloaded++;
+    }
+
+    await reader.close();
+
+    // Final head state update
+    if (snapshot.commitSha) {
+      index.lastKnownRemoteHeadSha = snapshot.commitSha;
+    }
+    await this.indexStore.save(index);
+
+    return {
+      uploaded: 0,
+      downloaded,
+      deletedLocal: 0,
+      deletedRemote: 0,
+      skipped: 0,
+      skippedFiles: []
+    };
   }
 
   private async planSync(
@@ -883,7 +977,14 @@ export class SyncEngine {
       current = current ? `${current}/${part}` : part;
       const existing = this.app.vault.getAbstractFileByPath(current);
       if (!existing) {
-        await this.app.vault.createFolder(current);
+        try {
+          await this.app.vault.createFolder(current);
+        } catch (error) {
+          // Ignore errors where the folder was created by a concurrent task
+          if (!(error instanceof Error && error.message.includes("already exists"))) {
+            throw error;
+          }
+        }
       }
     }
   }

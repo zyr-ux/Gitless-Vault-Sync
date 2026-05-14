@@ -9,6 +9,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.11.30",
+    "@zip.js/zip.js": "^2.8.26",
     "esbuild": "^0.28.0",
     "obsidian": "latest",
     "typescript": "^5.5.4"
