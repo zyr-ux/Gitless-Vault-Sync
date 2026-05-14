@@ -114,6 +114,10 @@ export class GitHubClient {
     }
   }
 
+  resetCommitChain(): void {
+    this.commitChainPromise = Promise.resolve();
+  }
+
   getLastServerTimeMs(): number | null {
     return this.lastServerTimeMs ?? null;
   }
@@ -333,7 +337,7 @@ export class GitHubClient {
 
   private serializeCommitChain<T>(work: () => Promise<T>): Promise<T> {
     const next = this.commitChainPromise.then(work);
-    this.commitChainPromise = next.catch(() => { });
+    this.commitChainPromise = next.then(() => {});
     return next;
   }
 

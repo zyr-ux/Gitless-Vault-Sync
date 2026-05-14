@@ -494,12 +494,12 @@ export default class VaultSyncPlugin extends Plugin {
       return;
     }
 
-    const index = await this.indexStore.load();
-    const path = normalizeVaultPath(file.path);
-    const entry = ensureEntry(index, path);
-    entry.deletedLocally = true;
-    entry.localDeletedAt = Date.now();
-    await this.indexStore.save(index);
+    await this.indexStore.withIndex(async (index) => {
+      const path = normalizeVaultPath(file.path);
+      const entry = ensureEntry(index, path);
+      entry.deletedLocally = true;
+      entry.localDeletedAt = Date.now();
+    });
   }
 
   private async markRenamed(file: TFile, oldPath: string): Promise<void> {
@@ -510,27 +510,26 @@ export default class VaultSyncPlugin extends Plugin {
       return;
     }
 
-    const index = await this.indexStore.load();
-    const normalizedOldPath = normalizeVaultPath(oldPath);
-    const normalizedNewPath = normalizeVaultPath(file.path);
-    const now = Date.now();
+    await this.indexStore.withIndex(async (index) => {
+      const normalizedOldPath = normalizeVaultPath(oldPath);
+      const normalizedNewPath = normalizeVaultPath(file.path);
+      const now = Date.now();
 
-    const oldEntry = index.entries[normalizedOldPath];
-    if (oldEntry) {
-      oldEntry.deletedLocally = true;
-      oldEntry.localDeletedAt = oldEntry.localDeletedAt ?? now;
-    } else {
-      const entry = ensureEntry(index, normalizedOldPath);
-      entry.deletedLocally = true;
-      entry.localDeletedAt = now;
-    }
+      const oldEntry = index.entries[normalizedOldPath];
+      if (oldEntry) {
+        oldEntry.deletedLocally = true;
+        oldEntry.localDeletedAt = oldEntry.localDeletedAt ?? now;
+      } else {
+        const entry = ensureEntry(index, normalizedOldPath);
+        entry.deletedLocally = true;
+        entry.localDeletedAt = now;
+      }
 
-    const newEntry = ensureEntry(index, normalizedNewPath);
-    newEntry.localMtime = file.stat.mtime;
-    newEntry.deletedLocally = false;
-    newEntry.localDeletedAt = undefined;
-
-    await this.indexStore.save(index);
+      const newEntry = ensureEntry(index, normalizedNewPath);
+      newEntry.localMtime = file.stat.mtime;
+      newEntry.deletedLocally = false;
+      newEntry.localDeletedAt = undefined;
+    });
   }
 
   private rebuildEventIgnoreMatcher(): void {

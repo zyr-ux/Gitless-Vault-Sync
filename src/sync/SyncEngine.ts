@@ -104,227 +104,243 @@ export class SyncEngine {
     allowPull: boolean;
     allowPush: boolean;
   }): Promise<boolean> {
-    const now = Date.now();
-    const ALWAYS_IGNORE = [
-      ".obsidian/workspace",
-      ".obsidian/workspace.json",
-      ".obsidian/workspace-mobile.json",
-      ".obsidian/cache",
-      ".obsidian/logs",
-      ".git/**",
-      ".stfolder/**",
-      ".vault-sync-init",
-      ".trash",
-      ".DS_Store",
-      ".obsidian/plugins/vault-sync/data.json",
-      ".obsidian/plugins/**/data.json"
-    ];
-    const userIgnorePatterns = (this.settings.ignorePatterns ?? []).filter(
-      (pattern) => !isObsidianPattern(pattern)
-    );
-    const ignorePatterns = [...ALWAYS_IGNORE, ...userIgnorePatterns];
-    const ignore = new IgnoreMatcher(ignorePatterns);
+    return this.indexStore.readIndex(async (baseIndex) => {
+      const now = Date.now();
+      const ALWAYS_IGNORE = [
+        ".obsidian/workspace",
+        ".obsidian/workspace.json",
+        ".obsidian/workspace-mobile.json",
+        ".obsidian/cache",
+        ".obsidian/logs",
+        ".git/**",
+        ".stfolder/**",
+        ".vault-sync-init",
+        ".trash",
+        ".DS_Store",
+        ".obsidian/plugins/vault-sync/data.json",
+        ".obsidian/plugins/**/data.json"
+      ];
+      const userIgnorePatterns = (this.settings.ignorePatterns ?? []).filter(
+        (pattern) => !isObsidianPattern(pattern)
+      );
+      const ignorePatterns = [...ALWAYS_IGNORE, ...userIgnorePatterns];
+      const ignore = new IgnoreMatcher(ignorePatterns);
 
-    const baseIndex = await this.indexStore.load();
-    const indexCount = Object.keys(baseIndex.entries).length;
-    console.warn(
-      `[Sync] Index entries: ${indexCount}, lastKnownRemoteHeadSha: ${baseIndex.lastKnownRemoteHeadSha || "(empty)"}`
-    );
-    const localFiles = await this.collectLocalFiles(ignore);
-    console.warn(`[Sync] Local files considered: ${localFiles.size}`);
-    const snapshot = await this.getRemoteSnapshot(baseIndex);
+      const indexCount = Object.keys(baseIndex.entries).length;
+      console.warn(
+        `[Sync] Index entries: ${indexCount}, lastKnownRemoteHeadSha: ${baseIndex.lastKnownRemoteHeadSha || "(empty)"}`
+      );
+      const localFiles = await this.collectLocalFiles(ignore);
+      console.warn(`[Sync] Local files considered: ${localFiles.size}`);
+      const snapshot = await this.getRemoteSnapshot();
 
-    const index = cloneIndexState(baseIndex);
-    const plan = await this.planSync(options, index, localFiles, snapshot, ignore, now);
+      const index = cloneIndexState(baseIndex);
+      const plan = await this.planSync(options, index, localFiles, snapshot, ignore, now);
 
-    return (
-      plan.toDownload.size > 0 ||
-      plan.toUpload.size > 0 ||
-      plan.toDeleteLocal.size > 0 ||
-      plan.toDeleteRemote.size > 0
-    );
+      return (
+        plan.toDownload.size > 0 ||
+        plan.toUpload.size > 0 ||
+        plan.toDeleteLocal.size > 0 ||
+        plan.toDeleteRemote.size > 0
+      );
+    });
   }
 
   private async runSync(options: {
     allowPull: boolean;
     allowPush: boolean;
   }): Promise<SyncResult> {
-    const now = Date.now();
-    // Hardcode critical ignores since the UI is hidden for now
-    const ALWAYS_IGNORE = [
-      ".obsidian/workspace",
-      ".obsidian/workspace.json",
-      ".obsidian/workspace-mobile.json",
-      ".obsidian/cache",
-      ".obsidian/logs",
-      ".git/**",
-      ".stfolder/**",
-      ".vault-sync-init",
-      ".trash",
-      ".DS_Store",
-      ".obsidian/plugins/vault-sync/data.json",
-      ".obsidian/plugins/**/data.json"
-    ];
-    const userIgnorePatterns = (this.settings.ignorePatterns ?? []).filter(
-      (pattern) => !isObsidianPattern(pattern)
-    );
-    const ignorePatterns = [...ALWAYS_IGNORE, ...userIgnorePatterns];
-    const ignore = new IgnoreMatcher(ignorePatterns);
+    this.client.resetCommitChain();
 
-    const baseIndex = await this.indexStore.load();
-
-    // Short-circuit: Check head before doing anything else
-    if (options.allowPull) {
-      try {
-        const headSha = await this.client.getBranchRef();
-        if (baseIndex.lastKnownRemoteHeadSha === headSha && headSha !== "") {
-          if (!options.allowPush) {
-            console.log(
-              `[Sync] Short-circuit: Remote head unchanged (${headSha}). Skipping pull.`
-            );
-            return {
-              uploaded: 0,
-              downloaded: 0,
-              deletedLocal: 0,
-              deletedRemote: 0,
-              skipped: 0,
-              skippedFiles: []
-            };
-          }
-
-          const hasLocalChanges = await this.detectLocalChanges(baseIndex, ignore);
-          if (!hasLocalChanges) {
-            console.log(
-              `[Sync] Short-circuit: Remote head unchanged (${headSha}) and no local changes. Skipping sync.`
-            );
-            return {
-              uploaded: 0,
-              downloaded: 0,
-              deletedLocal: 0,
-              deletedRemote: 0,
-              skipped: 0,
-              skippedFiles: []
-            };
-          }
-        }
-      } catch (e) {
-        // Fall back to full sync if head check fails
-      }
-    }
-
-    const localFiles = await this.collectLocalFiles(ignore);
-    let snapshot = await this.getRemoteSnapshot(baseIndex);
-
-    let skipped = 0;
-    const skippedFiles: string[] = [];
-
-    if (!snapshot.commitSha && options.allowPush) {
-      try {
-        await this.client.initializeRepository();
-        snapshot = await this.getRemoteSnapshot(baseIndex);
-      } catch (e) {
-        console.warn("Failed to initialize empty repository", e);
-      }
-    }
-
-    let index = cloneIndexState(baseIndex);
-    let plan = await this.planSync(options, index, localFiles, snapshot, ignore, now);
-
-    let uploaded = 0;
-    let deletedRemote = 0;
-    let pushAttempts = 0;
-
-    while (
-      options.allowPush &&
-      (plan.toUpload.size > 0 || plan.toDeleteRemote.size > 0)
-    ) {
-      try {
-        const pushResult = await this.pushPlan(
-          plan,
-          snapshot,
-          index,
-          skippedFiles
-        );
-        uploaded += pushResult.uploaded;
-        deletedRemote += pushResult.deletedRemote;
-        skipped += pushResult.skipped;
-        break;
-      } catch (error) {
-        if (error instanceof StaleRemoteHeadError && pushAttempts < MAX_PUSH_RETRIES) {
-          pushAttempts += 1;
-          snapshot = await this.getRemoteSnapshot(baseIndex);
-          index = cloneIndexState(baseIndex);
-          plan = await this.planSync(options, index, localFiles, snapshot, ignore, now);
-          continue;
-        }
-        throw error;
-      }
-    }
-
-    if (options.allowPush && (uploaded > 0 || deletedRemote > 0)) {
-      await this.indexStore.save(index);
-    }
-
-    let downloaded = 0;
-    let deletedLocal = 0;
-    if (options.allowPull) {
-      for (const path of plan.toDeleteLocal) {
-        const target = this.app.vault.getAbstractFileByPath(path);
-        if (target instanceof TFile) {
-          await this.app.vault.delete(target);
-          deletedLocal += 1;
-        }
-        removeEntry(index, path);
-      }
-
-      if (deletedLocal > 0) {
-        await this.indexStore.save(index);
-      }
-
-      const downloadTargets = Array.from(plan.toDownload.values());
-      const downloadResults = await runWithConcurrency(
-        downloadTargets,
-        MAX_FILE_IO_CONCURRENCY,
-        async (remote) => {
-          if (remote.size > MAX_BLOB_BYTES) {
-            skippedFiles.push(remote.path);
-            return { remote, file: null };
-          }
-          const file = await this.writeRemoteFile(remote);
-          return { remote, file };
-        }
+    return this.indexStore.withIndex(async (baseIndex) => {
+      const now = Date.now();
+      // Hardcode critical ignores since the UI is hidden for now
+      const ALWAYS_IGNORE = [
+        ".obsidian/workspace",
+        ".obsidian/workspace.json",
+        ".obsidian/workspace-mobile.json",
+        ".obsidian/cache",
+        ".obsidian/logs",
+        ".git/**",
+        ".stfolder/**",
+        ".vault-sync-init",
+        ".trash",
+        ".DS_Store",
+        ".obsidian/plugins/vault-sync/data.json",
+        ".obsidian/plugins/**/data.json"
+      ];
+      const userIgnorePatterns = (this.settings.ignorePatterns ?? []).filter(
+        (pattern) => !isObsidianPattern(pattern)
       );
+      const ignorePatterns = [...ALWAYS_IGNORE, ...userIgnorePatterns];
+      const ignore = new IgnoreMatcher(ignorePatterns);
 
-      for (const result of downloadResults) {
-        if (!result.file) {
-          skipped += 1;
-          continue;
+      // Short-circuit: Check head before doing anything else
+      if (options.allowPull) {
+        try {
+          const headSha = await this.client.getBranchRef();
+          if (baseIndex.lastKnownRemoteHeadSha === headSha && headSha !== "") {
+            if (!options.allowPush) {
+              console.log(
+                `[Sync] Short-circuit: Remote head unchanged (${headSha}). Skipping pull.`
+              );
+              return {
+                uploaded: 0,
+                downloaded: 0,
+                deletedLocal: 0,
+                deletedRemote: 0,
+                skipped: 0,
+                skippedFiles: []
+              };
+            }
+
+            const hasLocalChanges = await this.detectLocalChanges(baseIndex, ignore);
+            if (!hasLocalChanges) {
+              console.log(
+                `[Sync] Short-circuit: Remote head unchanged (${headSha}) and no local changes. Skipping sync.`
+              );
+              return {
+                uploaded: 0,
+                downloaded: 0,
+                deletedLocal: 0,
+                deletedRemote: 0,
+                skipped: 0,
+                skippedFiles: []
+              };
+            }
+          }
+        } catch (e) {
+          // Fall back to full sync if head check fails
         }
+      }
 
-        const entry = ensureEntry(index, normalizeVaultPath(result.remote.path));
-        entry.remoteSha = result.remote.sha;
-        entry.localHash = result.remote.sha; // For downloads, we know the local hash matches remote
-        entry.size = result.remote.size;
-        entry.lastRemoteCommitTime = snapshot.commitTime;
-        entry.lastSynced = now;
-        entry.localMtime = result.file.stat.mtime;
-        entry.deletedLocally = false;
-        entry.localDeletedAt = undefined;
-        downloaded += 1;
+      const localFiles = await this.collectLocalFiles(ignore);
+      let snapshot = await this.getRemoteSnapshot();
+
+      let skipped = 0;
+      const skippedFiles: string[] = [];
+
+      if (!snapshot.commitSha && options.allowPush) {
+        try {
+          await this.client.initializeRepository();
+          snapshot = await this.getRemoteSnapshot();
+        } catch (e) {
+          console.warn("Failed to initialize empty repository", e);
+        }
+      }
+
+      // Update the base index with the latest remote head we just found
+      if (snapshot.commitSha) {
+        baseIndex.lastKnownRemoteHeadSha = snapshot.commitSha;
+      }
+
+      let index = cloneIndexState(baseIndex);
+      let plan = await this.planSync(options, index, localFiles, snapshot, ignore, now);
+
+      let uploaded = 0;
+      let deletedRemote = 0;
+      let pushAttempts = 0;
+
+      while (
+        options.allowPush &&
+        (plan.toUpload.size > 0 || plan.toDeleteRemote.size > 0)
+      ) {
+        try {
+          const pushResult = await this.pushPlan(
+            plan,
+            snapshot,
+            index,
+            skippedFiles
+          );
+          uploaded += pushResult.uploaded;
+          deletedRemote += pushResult.deletedRemote;
+          skipped += pushResult.skipped;
+          break;
+        } catch (error) {
+          if (error instanceof StaleRemoteHeadError && pushAttempts < MAX_PUSH_RETRIES) {
+            pushAttempts += 1;
+            snapshot = await this.getRemoteSnapshot();
+            // Update baseIndex head too for consistency if we retry
+            if (snapshot.commitSha) {
+              baseIndex.lastKnownRemoteHeadSha = snapshot.commitSha;
+            }
+            index = cloneIndexState(baseIndex);
+            plan = await this.planSync(options, index, localFiles, snapshot, ignore, now);
+            continue;
+          }
+          throw error;
+        }
+      }
+
+      // Partial save after push if we uploaded anything
+      if (options.allowPush && (uploaded > 0 || deletedRemote > 0)) {
         await this.indexStore.save(index);
       }
-    }
 
-    await this.indexStore.save(index);
+      let downloaded = 0;
+      let deletedLocal = 0;
+      if (options.allowPull) {
+        for (const path of plan.toDeleteLocal) {
+          const target = this.app.vault.getAbstractFileByPath(path);
+          if (target instanceof TFile) {
+            await this.app.vault.delete(target);
+            deletedLocal += 1;
+          }
+          removeEntry(index, path);
+        }
 
-    return {
-      uploaded,
-      downloaded,
-      deletedLocal,
-      deletedRemote,
-      skipped,
-      skippedFiles
-    };
+        // Partial save after deletes
+        if (deletedLocal > 0) {
+          await this.indexStore.save(index);
+        }
+
+        const downloadTargets = Array.from(plan.toDownload.values());
+        const downloadResults = await runWithConcurrency(
+          downloadTargets,
+          MAX_FILE_IO_CONCURRENCY,
+          async (remote) => {
+            if (remote.size > MAX_BLOB_BYTES) {
+              skippedFiles.push(remote.path);
+              return { remote, file: null };
+            }
+            const file = await this.writeRemoteFile(remote);
+            return { remote, file };
+          }
+        );
+
+        for (const result of downloadResults) {
+          if (!result.file) {
+            skipped += 1;
+            continue;
+          }
+
+          const entry = ensureEntry(index, normalizeVaultPath(result.remote.path));
+          entry.remoteSha = result.remote.sha;
+          entry.localHash = result.remote.sha; // For downloads, we know the local hash matches remote
+          entry.size = result.remote.size;
+          entry.lastRemoteCommitTime = snapshot.commitTime;
+          entry.lastSynced = now;
+          entry.localMtime = result.file.stat.mtime;
+          entry.deletedLocally = false;
+          entry.localDeletedAt = undefined;
+          downloaded += 1;
+          // Redundant saves removed here (Issue 3)
+        }
+      }
+
+      // Final state update to baseIndex for withIndex to save
+      Object.assign(baseIndex.entries, index.entries);
+      baseIndex.lastKnownRemoteHeadSha = index.lastKnownRemoteHeadSha;
+
+      return {
+        uploaded,
+        downloaded,
+        deletedLocal,
+        deletedRemote,
+        skipped,
+        skippedFiles
+      };
+    });
   }
 
   private async planSync(
@@ -804,10 +820,9 @@ export class SyncEngine {
     return false;
   }
 
-  private async getRemoteSnapshot(index: SyncIndexState): Promise<RemoteSnapshot> {
+  private async getRemoteSnapshot(): Promise<RemoteSnapshot> {
     try {
       const snapshot = await this.client.getLatestSnapshot();
-      index.lastKnownRemoteHeadSha = snapshot.commitSha;
       const serverTimeMs = this.client.getLastServerTimeMs() ?? Date.now();
       return { ...snapshot, serverTimeMs };
     } catch (error) {

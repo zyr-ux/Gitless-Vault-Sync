@@ -27,6 +27,7 @@ const EMPTY_INDEX: SyncIndexState = { entries: {}, lastKnownRemoteHeadSha: "" };
 
 export class IndexStore {
   private plugin: Plugin;
+  private queue: Promise<void> = Promise.resolve();
 
   constructor(plugin: Plugin) {
     this.plugin = plugin;
@@ -47,6 +48,57 @@ export class IndexStore {
     await this.plugin.saveData(data);
     const count = Object.keys(index.entries).length;
     console.warn(`[Sync] Index save: ${count} entries`);
+  }
+
+  /**
+   * Performs a transaction-like operation on the sync index.
+   * Ensures that the index is loaded, modified by the callback, and saved atomically
+   * relative to other withIndex calls.
+   */
+  async withIndex<T>(
+    callback: (index: SyncIndexState) => Promise<T>
+  ): Promise<T> {
+    return new Promise((resolve, reject) => {
+      this.queue = this.queue
+        .then(async () => {
+          try {
+            const index = await this.load();
+            const result = await callback(index);
+            await this.save(index);
+            resolve(result);
+          } catch (error) {
+            reject(error);
+          }
+        })
+        .catch((error) => {
+          // Ensure the queue continues even if one operation fails
+          reject(error);
+        });
+    });
+  }
+
+  /**
+   * Performs a serialized read of the index.
+   * Waits for any pending writes to complete before loading and providing the index.
+   */
+  async readIndex<T>(
+    callback: (index: SyncIndexState) => Promise<T>
+  ): Promise<T> {
+    return new Promise((resolve, reject) => {
+      this.queue = this.queue
+        .then(async () => {
+          try {
+            const index = await this.load();
+            const result = await callback(index);
+            resolve(result);
+          } catch (error) {
+            reject(error);
+          }
+        })
+        .catch((error) => {
+          reject(error);
+        });
+    });
   }
 }
 
