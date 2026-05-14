@@ -928,26 +928,49 @@ export class SyncEngine {
     }
   }
 
-  private async writeRemoteFile(remote: RemoteFile): Promise<TFile | null> {
+  private async writeRemoteFile(
+    remote: RemoteFile
+  ): Promise<{ stat: { mtime: number } } | null> {
     const blob = await this.client.getBlob(remote.sha);
     const path = normalizeVaultPath(remote.path);
 
     await this.ensureParentFolder(path);
 
     const existing = this.app.vault.getAbstractFileByPath(path);
+    if (existing instanceof TFile) {
+      if (blob.encoding === "base64") {
+        const data = base64ToArrayBuffer(blob.content);
+        await this.app.vault.modifyBinary(existing, data);
+      } else {
+        await this.app.vault.modify(existing, blob.content);
+      }
+      return existing;
+    }
+
+    // Check disk directly for files not in vault index (e.g. .obsidian/ files)
+    const diskStat = await this.app.vault.adapter.stat(path);
+    if (diskStat) {
+      if (diskStat.type === "folder") {
+        throw new Error(`Cannot write file ${path}: a folder exists at this path.`);
+      }
+
+      if (blob.encoding === "base64") {
+        const data = base64ToArrayBuffer(blob.content);
+        await this.app.vault.adapter.writeBinary(path, data);
+      } else {
+        await this.app.vault.adapter.write(path, blob.content);
+      }
+
+      const newStat = await this.app.vault.adapter.stat(path);
+      return { stat: { mtime: newStat?.mtime ?? Date.now() } };
+    }
+
+    // Doesn't exist on disk, use vault.create to ensure it's added to the index if supported
     if (blob.encoding === "base64") {
       const data = base64ToArrayBuffer(blob.content);
-      if (existing instanceof TFile) {
-        await this.app.vault.modifyBinary(existing, data);
-        return existing;
-      }
       return this.app.vault.createBinary(path, data);
     }
 
-    if (existing instanceof TFile) {
-      await this.app.vault.modify(existing, blob.content);
-      return existing;
-    }
     return this.app.vault.create(path, blob.content);
   }
 
