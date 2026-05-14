@@ -2,30 +2,24 @@
 This CSS file is loaded when the plugin is enabled.
 */
 
-.gh-sync-ribbon {
+.gitless-vault-sync-ribbon {
   order: 100;
 }
 
-.howto {
-  border: 1px solid var(--background-modifier-border);
-  padding: 10px;
+.gitless-vault-sync-setting-input {
+  width: 30em;
 }
 
-.howto_title {
-  font-weight: 600;
+.gitless-vault-sync-setting-input-small {
+  width: 30em;
 }
 
-.howto_text {
+.gitless-vault-sync-footer {
   color: var(--text-muted);
   font-size: smaller;
-}
-
-.my-plugin-setting-text {
-  width: 30em;
-}
-
-.my-plugin-setting-text2 {
-  width: 30em;
+  margin-top: 20px;
+  border-top: 1px solid var(--background-modifier-border);
+  padding-top: 10px;
 }
 
 .gitless-vault-sync-spinner {

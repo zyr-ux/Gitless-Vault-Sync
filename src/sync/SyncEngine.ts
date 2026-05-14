@@ -439,11 +439,11 @@ export class SyncEngine {
     const toDeleteRemote = new Set<string>();
 
     let snapshotFiles = snapshot.files;
-    const initFile = snapshotFiles.find((file) => file.path === ".vault-sync-init");
+    const initFile = snapshotFiles.find((file) => file.path === ".gitless-vault-sync-init");
     if (initFile) {
-      snapshotFiles = snapshotFiles.filter((file) => file.path !== ".vault-sync-init");
+      snapshotFiles = snapshotFiles.filter((file) => file.path !== ".gitless-vault-sync-init");
       if (options.allowPush) {
-        toDeleteRemote.add(".vault-sync-init");
+        toDeleteRemote.add(".gitless-vault-sync-init");
       }
     }
 

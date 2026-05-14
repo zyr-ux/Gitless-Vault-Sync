@@ -172,7 +172,7 @@ If `repoOwner` is left blank in settings, the client calls `GET /user` once and 
 | `createCommit(msg, tree, parents)` | `POST /git/commits` | Create commit object |
 | `updateBranchRef(sha)` | `PATCH /git/refs/heads/{branch}` | Fast-forward branch to new commit |
 | `createBranchRef(sha)` | `POST /git/refs` | Create branch for the first time |
-| `initializeRepository()` | `PUT /contents/.vault-sync-init` | Bootstrap an empty repo with a placeholder file |
+| `initializeRepository()` | `PUT /contents/.gitless-vault-sync-init` | Bootstrap an empty repo with a placeholder file |
 
 #### Path prefix support
 
@@ -222,7 +222,7 @@ Regardless of user settings, these paths are always excluded from sync:
 
 #### Empty repository bootstrap
 
-If `getRemoteSnapshot()` returns an empty result (404 or 409 on a brand-new repo) and a push is allowed, `initializeRepository()` is called to create a placeholder `.vault-sync-init` file so the branch and first commit exist. The init file is then queued for deletion in the same sync run.
+If `getRemoteSnapshot()` returns an empty result (404 or 409 on a brand-new repo) and a push is allowed, `initializeRepository()` is called to create a placeholder `.gitless-vault-sync-init` file so the branch and first commit exist. The init file is then queued for deletion in the same sync run.
 
 #### Push retry
 

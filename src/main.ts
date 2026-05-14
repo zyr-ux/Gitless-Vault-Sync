@@ -46,7 +46,7 @@ export default class GitlessVaultSyncPlugin extends Plugin {
         this.requestSync(true);
       }
     );
-    ribbonIconEl.addClass("gh-sync-ribbon");
+    ribbonIconEl.addClass("gitless-vault-sync-ribbon");
     this.initializeSync();
     this.registerVaultEvents();
     this.startAutoPull();
@@ -527,7 +527,7 @@ export default class GitlessVaultSyncPlugin extends Plugin {
       ".obsidian/logs",
       ".git/**",
       ".stfolder/**",
-      ".vault-sync-init",
+      ".gitless-vault-sync-init",
       ".trash",
       ".DS_Store",
       ".obsidian/plugins/gitless-vault-sync/data.json",

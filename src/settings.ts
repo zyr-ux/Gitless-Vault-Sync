@@ -63,7 +63,7 @@ export class GitlessVaultSyncSettingTab extends PluginSettingTab {
       .addText((text) => {
         text.setPlaceholder("ghp_...");
         text.inputEl.type = "password";
-        text.inputEl.addClass("my-plugin-setting-text");
+        text.inputEl.addClass("gitless-vault-sync-setting-input");
         text.setValue(this.plugin.settings.githubToken);
         text.onChange(async (value) => {
           this.plugin.settings.githubToken = value.trim();
@@ -76,7 +76,7 @@ export class GitlessVaultSyncSettingTab extends PluginSettingTab {
       .setDesc("GitHub user or organization. Leave blank to auto-detect from your PAT.")
       .addText((text) => {
         text.setPlaceholder("owner");
-        text.inputEl.addClass("my-plugin-setting-text");
+        text.inputEl.addClass("gitless-vault-sync-setting-input");
         text.setValue(this.plugin.settings.repoOwner);
         text.onChange(async (value) => {
           this.plugin.settings.repoOwner = value.trim();
@@ -89,7 +89,7 @@ export class GitlessVaultSyncSettingTab extends PluginSettingTab {
       .setDesc("Name of your remote repository.")
       .addText((text) => {
         text.setPlaceholder("vault");
-        text.inputEl.addClass("my-plugin-setting-text");
+        text.inputEl.addClass("gitless-vault-sync-setting-input");
         text.setValue(this.plugin.settings.repoName);
         text.onChange(async (value) => {
           this.plugin.settings.repoName = value.trim();
@@ -102,7 +102,7 @@ export class GitlessVaultSyncSettingTab extends PluginSettingTab {
       .setDesc("Branch to sync against.")
       .addText((text) => {
         text.setPlaceholder("main");
-        text.inputEl.addClass("my-plugin-setting-text");
+        text.inputEl.addClass("gitless-vault-sync-setting-input");
         text.setValue(this.plugin.settings.branch);
         text.onChange(async (value) => {
           this.plugin.settings.branch = value.trim() || "main";
@@ -115,7 +115,7 @@ export class GitlessVaultSyncSettingTab extends PluginSettingTab {
       .setDesc("Optional subfolder in the repo (leave blank for root).")
       .addText((text) => {
         text.setPlaceholder("notes/");
-        text.inputEl.addClass("my-plugin-setting-text");
+        text.inputEl.addClass("gitless-vault-sync-setting-input");
         text.setValue(this.plugin.settings.repoPathPrefix);
         text.onChange(async (value) => {
           this.plugin.settings.repoPathPrefix = value.trim();
@@ -128,7 +128,7 @@ export class GitlessVaultSyncSettingTab extends PluginSettingTab {
       .setDesc("Used in commit messages. Leave blank to auto-detect.")
       .addText((text) => {
         text.setPlaceholder(detectDeviceName());
-        text.inputEl.addClass("my-plugin-setting-text");
+        text.inputEl.addClass("gitless-vault-sync-setting-input");
         text.setValue(this.plugin.settings.deviceName);
         text.onChange(async (value) => {
           this.plugin.settings.deviceName = value.trim();
@@ -141,7 +141,7 @@ export class GitlessVaultSyncSettingTab extends PluginSettingTab {
       .setName("Auto-sync interval (sec)")
       .setDesc("Automatically sync with remote on this interval. Set to 0 to disable.")
       .addText((text) => {
-        text.inputEl.addClass("my-plugin-setting-text2");
+        text.inputEl.addClass("gitless-vault-sync-setting-input-small");
         text.setValue(String(this.plugin.settings.syncIntervalSec));
         text.onChange(async (value) => {
           this.plugin.settings.syncIntervalSec = toNonNegativeInt(
@@ -194,7 +194,7 @@ export class GitlessVaultSyncSettingTab extends PluginSettingTab {
           })
       );
 
-    const footer = containerEl.createEl("p", { cls: "vault-sync-footer" });
+    const footer = containerEl.createEl("p", { cls: "gitless-vault-sync-footer" });
     footer.createEl("span", { text: "To know how to set up, visit the " });
     footer.createEl("a", {
       href: "https://github.com/zyr-ux/Gitless-Vault-Sync/blob/main/README.md",
