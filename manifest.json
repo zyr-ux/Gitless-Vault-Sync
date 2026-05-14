@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "minAppVersion": "1.5.0",
   "description": "Syncs an Obsidian vault to a GitHub repository using the GitHub REST API.",
-  "author": "Vault Sync",
-  "authorUrl": "",
+  "author": "Zyrux",
+  "authorUrl": "https://github.com/zyr-ux",
   "isDesktopOnly": false
 }
