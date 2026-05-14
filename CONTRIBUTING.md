@@ -109,6 +109,7 @@ For a deep-dive into how these modules interact, see [ARCHITECTURE.md](ARCHITECT
 
 - Always use Obsidian's `vault` API for file operations — never use Node `fs` at runtime (esbuild bundles for the browser target).
 - Use `vault.readBinary` / `vault.modifyBinary` / `vault.createBinary` for all file types so binary files are handled correctly.
+- Be aware that `IndexStore` performs in-memory caching and debounced saves to minimize I/O; use `withIndex` for thread-safe access to the sync state.
 
 ### Sync index
 
@@ -151,7 +152,7 @@ Example: `fix: handle 409 on empty repository initialization`
 - **Do not change `manifest.json` version or `versions.json` manually.** These are managed automatically by the release workflow when a tag is pushed.
 - **Do not commit `main.js`.** It is in `.gitignore` for a reason.
 - **Do not add runtime Node.js dependencies.** The plugin runs inside Obsidian's browser-like environment. Only devDependencies (build tools, types) are acceptable.
-- **Always ignore `data.json`** — it is in the hardcoded `ALWAYS_IGNORE` list in `SyncEngine` and must stay excluded from sync.
+- **Always ignore data.json** — it is in the hardcoded always-ignore list in `SyncEngine` (relative to the vault's `configDir`) and must stay excluded from sync.
 
 ---
 

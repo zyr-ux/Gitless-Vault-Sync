@@ -102,6 +102,7 @@ Gitless Vault Sync/
 - **Auto sync timer** — starts a `setInterval` that fires a sync on the configured interval (default 300 s). Restarted any time settings change.
 - **Auto sync on startup** — if `autoSync` is enabled, queues a sync immediately after load.
 - **Foreground sync** — on mobile, a sync is requested when Obsidian becomes active again (debounced) to ensure the vault is fresh.
+- **Syncing Notices** — on both desktop and mobile, a "Syncing notes" notice with a loading spinner is shown during manual syncs. Background syncs remain silent.
 
 #### Sync request queuing
 
@@ -195,17 +196,21 @@ sync() → runSync()
 
 #### Always-ignore list
 
-Regardless of user settings, these paths are always excluded from sync:
+Regardless of user settings, these paths are always excluded from sync (where `{configDir}` is the vault's configuration folder, typically `.obsidian`):
 
 ```
-.obsidian/workspace
-.obsidian/workspace.json
-.obsidian/workspace-mobile.json
-.obsidian/cache
-.obsidian/logs
+{configDir}/workspace
+{configDir}/workspace.json
+{configDir}/workspace-mobile.json
+{configDir}/cache
+{configDir}/logs
+.git/**
+.stfolder/**
+.gitless-vault-sync-init
 .trash
 .DS_Store
-.obsidian/plugins/gitless-vault-sync/data.json   ← prevents syncing the plugin's own state
+{configDir}/plugins/gitless-vault-sync/data.json   ← prevents syncing the plugin's own state
+{configDir}/plugins/**/data.json                  ← prevents syncing other plugins' state
 ```
 
 #### Empty repository bootstrap
@@ -216,9 +221,9 @@ If `getRemoteSnapshot()` returns an empty result (404 or 409 on a brand-new repo
 
 Syncs are prepared from a snapshot of the remote tree. If the branch advances during the sync, `updateBranchRef` returns a non-fast-forward error. The engine treats this as a stale-head signal, re-fetches the snapshot, re-plans, and retries a small number of times.
 
-#### Incremental index saves
+#### In-memory caching and batch saves
 
-The index is persisted after successful sync work and incrementally after downloads/deletions. This avoids losing partial work if the sync is interrupted.
+The `IndexStore` maintains an in-memory cache of the index to minimize I/O. For frequent updates (like during local file events), it uses a debounced batch saving strategy (2-second window) to avoid redundant writes to `data.json`. Critical sync operations still perform immediate saves to ensure durability.
 
 #### Concurrency
 
@@ -250,6 +255,8 @@ interface SyncIndexEntry {
 
 This is persisted inside Obsidian's `data.json` alongside settings under the key `index`. `normalizePluginData` handles the case where old data stored settings at the top level (migration from a flat format).
 
+`IndexStore` also provides a `withIndex` helper that ensures serialised access to the index state, preventing race conditions during concurrent updates.
+
 ---
 
 ### Ignore Matcher — `IgnoreMatcher`
@@ -258,11 +265,11 @@ This is persisted inside Obsidian's `data.json` alongside settings under the key
 
 Converts gitignore-style glob patterns to `RegExp` objects. Supports:
 - `*` — matches any character except `/`
-- `**` — matches anything including `/`
+- `**` — matches anything including `/` (can be used as `**/foo` or `foo/**`)
 - `?` — matches any single character except `/`
-- Trailing `/` — expanded to `/**` (matches directory and all contents)
+- Trailing `/` — matches directory and all its contents
 
-Paths are normalised to forward-slash format before matching.
+The matcher distinguishes between **root-relative** patterns (those containing a `/` or starting with `/`) and **basename** matches (simple names like `node_modules` which match anywhere in the vault).
 
 ---
 
@@ -321,6 +328,10 @@ For each file that exists in the index, the engine evaluates two boolean flags:
 For files **locally deleted** since the last sync:
 - If the remote has changed since the deletion timestamp → **restore from remote** (remote wins)
 - Otherwise → **delete from remote** (local deletion wins)
+
+For files **remotely deleted** since the last sync:
+- If the local file has changed since the last sync → **re-upload to remote** (local changes win)
+- Otherwise → **delete from local** (remote deletion wins)
 
 For files **not in the index** at all:
 - Remote-only → download

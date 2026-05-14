@@ -131,7 +131,7 @@ That's it — no `git init`, no terminal. Click the GitHub ribbon icon to do you
 
 Click the **GitHub icon** in the left ribbon to perform a full **Sync** (pull + push). This is the most common operation: it fetches any remote changes and pushes any local changes in a single step.
 
-On desktop, manual syncs show a short **"Syncing notes"** spinner notice that disappears once the sync completes.
+Manual syncs show a short **"Syncing notes"** spinner notice that disappears once the sync completes. This is visible on both **desktop and mobile**.
 
 ### Command Palette
 
@@ -208,21 +208,31 @@ This is a simple, last-write-wins approach. It works well for personal note-taki
 - If you **delete a file locally** and it has not changed remotely since the last sync, the file is **deleted from GitHub** on the next push.
 - If a file was **deleted remotely** and hasn't changed locally, it is **deleted from your vault** on the next pull.
 - If a file was deleted locally but **also changed remotely** after the deletion, the remote version is restored (safe recovery).
+- If a file was deleted remotely but **also changed locally** before the next sync, the local version is re-uploaded (local changes win).
 
 ### Ignored Files
 
-The following paths are always excluded from sync, regardless of settings:
+The following paths are always excluded from sync (where `{configDir}` is your vault's config folder, typically `.obsidian`):
 
 ```
-.obsidian/workspace
-.obsidian/workspace.json
-.obsidian/workspace-mobile.json
-.obsidian/cache
-.obsidian/logs
+{configDir}/workspace
+{configDir}/workspace.json
+{configDir}/workspace-mobile.json
+{configDir}/cache
+{configDir}/logs
+.git/**
+.stfolder/**
+.gitless-vault-sync-init
 .trash
 .DS_Store
-.obsidian/plugins/gitless-vault-sync/data.json
+{configDir}/plugins/gitless-vault-sync/data.json
+{configDir}/plugins/**/data.json
 ```
+
+Vault Sync also supports custom **Ignore patterns** in settings. These follow `.gitignore` rules:
+- Patterns with a slash (like `folder/file.md` or `/root.md`) are **root-relative**.
+- Simple patterns (like `node_modules` or `*.tmp`) are **basename matches** and apply anywhere in the vault.
+- `**` can be used to match multiple directory levels.
 
 > [!IMPORTANT]
 > `data.json` (the plugin's sync index and settings, including your token) is always excluded. It is **never uploaded to GitHub**.
