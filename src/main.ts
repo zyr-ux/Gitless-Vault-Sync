@@ -35,6 +35,7 @@ export default class VaultSyncPlugin extends Plugin {
   private syncingNotice?: Notice;
   private suppressAutoPush = false;
   private eventIgnoreMatcher?: IgnoreMatcher;
+  private isUnloaded = false;
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -57,6 +58,7 @@ export default class VaultSyncPlugin extends Plugin {
   }
 
   onunload(): void {
+    this.isUnloaded = true;
     this.clearTimers();
   }
 
@@ -205,7 +207,15 @@ export default class VaultSyncPlugin extends Plugin {
     }
 
     const scheduleNext = () => {
+      if (this.isUnloaded) {
+        return;
+      }
+
       this.intervalId = window.setTimeout(async () => {
+        if (this.isUnloaded) {
+          return;
+        }
+
         const start = Date.now();
         await this.requestSync("pull");
         const duration = Date.now() - start;

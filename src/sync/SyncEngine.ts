@@ -764,19 +764,23 @@ export class SyncEngine {
         continue;
       }
 
-      const listing = await this.app.vault.adapter.list(current);
-      for (const file of listing.files) {
-        const normalized = normalizeVaultPath(file);
-        if (isValidGitPath(normalized)) {
-          results.push(normalized);
+      try {
+        const listing = await this.app.vault.adapter.list(current);
+        for (const file of listing.files) {
+          const normalized = normalizeVaultPath(file);
+          if (isValidGitPath(normalized)) {
+            results.push(normalized);
+          }
         }
-      }
 
-      for (const folder of listing.folders) {
-        const normalized = normalizeVaultPath(folder);
-        if (isValidGitPath(normalized)) {
-          pending.push(normalized);
+        for (const folder of listing.folders) {
+          const normalized = normalizeVaultPath(folder);
+          if (isValidGitPath(normalized)) {
+            pending.push(normalized);
+          }
         }
+      } catch (error) {
+        console.warn(`[Sync] Failed to list contents of folder: ${current}. Skipping.`, error);
       }
     }
 
