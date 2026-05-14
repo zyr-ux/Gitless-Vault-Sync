@@ -92,14 +92,6 @@ export class SyncEngine {
     return this.runSync({ allowPull: true, allowPush: true });
   }
 
-  async pull(): Promise<SyncResult> {
-    return this.runSync({ allowPull: true, allowPush: false });
-  }
-
-  async push(): Promise<SyncResult> {
-    return this.runSync({ allowPull: false, allowPush: true });
-  }
-
   async hasPendingChanges(options: {
     allowPull: boolean;
     allowPush: boolean;

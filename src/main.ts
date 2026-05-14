@@ -10,7 +10,6 @@ import { IndexStore } from "./sync/IndexStore";
 import { IgnoreMatcher } from "./sync/IgnoreMatcher";
 import { SyncEngine, type SyncResult } from "./sync/SyncEngine";
 
-type SyncMode = "pull" | "push" | "sync";
 type NoticeSeverity = "INFO" | "WARNING" | "ERROR";
 
 const FOREGROUND_SYNC_COOLDOWN_MS = 15000;
@@ -26,11 +25,10 @@ export default class VaultSyncPlugin extends Plugin {
   private intervalId: number | null = null;
   private settingsSaveTimer: number | null = null;
   private syncInFlight = false;
-  private pendingMode: SyncMode | null = null;
+  private syncPending = false;
   private pendingNotice = false;
   private lastForegroundSyncAt = 0;
-  private lastAutoPushAt = 0;
-  private lastAutoPullAt = 0;
+  private lastAutoSyncAt = 0;
   private pausedUntil = 0;
   private syncingNotice?: Notice;
   private suppressAutoPush = false;
@@ -45,7 +43,7 @@ export default class VaultSyncPlugin extends Plugin {
       "github",
       "Sync with Remote",
       () => {
-        this.requestSync("sync", true);
+        this.requestSync(true);
       }
     );
     ribbonIconEl.addClass("gh-sync-ribbon");
@@ -53,7 +51,7 @@ export default class VaultSyncPlugin extends Plugin {
     this.registerVaultEvents();
     this.startAutoPull();
     if (this.settings.syncOnStart) {
-      this.requestSync("pull");
+      this.requestSync();
     } else {
       // Suppression of the immediate foreground pull from the initial active-leaf-change event.
       this.lastForegroundSyncAt = Date.now();
@@ -199,7 +197,7 @@ export default class VaultSyncPlugin extends Plugin {
     }
 
     this.lastForegroundSyncAt = now;
-    this.requestSync("pull");
+    this.requestSync();
   }
 
   private startAutoPull(): void {
@@ -220,7 +218,7 @@ export default class VaultSyncPlugin extends Plugin {
         }
 
         const start = Date.now();
-        await this.requestSync("pull");
+        await this.requestSync();
         const duration = Date.now() - start;
 
         // Base interval + jitter (0-30s) - duration compensation
@@ -257,11 +255,11 @@ export default class VaultSyncPlugin extends Plugin {
 
     this.debounceTimer = window.setTimeout(() => {
       this.debounceTimer = null;
-      this.requestSync("push");
+      this.requestSync();
     }, this.settings.debounceMs);
   }
 
-  private requestSync(mode: SyncMode, showNotice = false): void {
+  private requestSync(showNotice = false): void {
     if (!this.isConfigured() || !this.syncEngine) {
       if (showNotice) {
         this.showNotice("Vault Sync is not configured.", "WARNING");
@@ -278,7 +276,7 @@ export default class VaultSyncPlugin extends Plugin {
       );
     }
 
-    this.pendingMode = mergeModes(this.pendingMode, mode);
+    this.syncPending = true;
     this.pendingNotice = this.pendingNotice || showNotice;
     void this.runNextSync();
   }
@@ -288,8 +286,7 @@ export default class VaultSyncPlugin extends Plugin {
       return;
     }
 
-    const mode = this.pendingMode;
-    if (!mode) {
+    if (!this.syncPending) {
       return;
     }
 
@@ -298,44 +295,29 @@ export default class VaultSyncPlugin extends Plugin {
 
     // Check abuse pause for automated syncs
     if (!isManual && this.pausedUntil > now) {
-      this.pendingMode = null;
+      this.syncPending = false;
       this.pendingNotice = false;
       return;
     }
 
-    // Check independent cooldowns for automated syncs
-    if (!isManual) {
-      if (mode === "push" && now - this.lastAutoPushAt < MIN_SYNC_COOLDOWN_MS) {
-        return; // Keep pendingMode as "push" to try again via debounce or interval
-      }
-      if (mode === "pull" && now - this.lastAutoPullAt < MIN_SYNC_COOLDOWN_MS) {
-        return;
-      }
+    // Check independent cooldown for automated syncs
+    if (!isManual && now - this.lastAutoSyncAt < MIN_SYNC_COOLDOWN_MS) {
+      return; // Keep syncPending true to try again via debounce or interval
     }
 
-    this.pendingMode = null;
+    this.syncPending = false;
     const shouldNotify = this.pendingNotice;
     this.pendingNotice = false;
     this.syncInFlight = true;
-    this.suppressAutoPush = mode !== "push";
+    this.suppressAutoPush = true;
 
     if (shouldNotify && Platform.isDesktop) {
       this.showSyncingNotice();
     }
 
     try {
-      let result: SyncResult;
-      if (mode === "pull") {
-        result = await this.syncEngine.pull();
-        this.lastAutoPullAt = Date.now();
-      } else if (mode === "push") {
-        result = await this.syncEngine.push();
-        this.lastAutoPushAt = Date.now();
-      } else {
-        result = await this.syncEngine.sync();
-        this.lastAutoPullAt = Date.now();
-        this.lastAutoPushAt = Date.now();
-      }
+      const result = await this.syncEngine.sync();
+      this.lastAutoSyncAt = Date.now();
 
       const hadSpinner = !!this.syncingNotice;
       this.hideSyncingNotice();
@@ -344,7 +326,7 @@ export default class VaultSyncPlugin extends Plugin {
       }
 
       if (shouldNotify) {
-        this.showSyncNotice(result, mode);
+        this.showSyncNotice(result);
       }
     } catch (error) {
       const hadSpinner = !!this.syncingNotice;
@@ -365,7 +347,7 @@ export default class VaultSyncPlugin extends Plugin {
         }
 
         if (error.status === 401 || error.status === 403) {
-          this.pendingMode = null;
+          this.syncPending = false;
         }
         this.showNotice(`Sync failed: ${this.formatGitHubError(error)}`, "ERROR", 10000);
       } else {
@@ -376,7 +358,7 @@ export default class VaultSyncPlugin extends Plugin {
       this.hideSyncingNotice();
       this.syncInFlight = false;
       this.suppressAutoPush = false;
-      if (this.pendingMode) {
+      if (this.syncPending) {
         void this.runNextSync();
       }
     }
@@ -462,19 +444,7 @@ export default class VaultSyncPlugin extends Plugin {
     this.addCommand({
       id: "vault-sync-sync-now",
       name: "Sync now",
-      callback: () => this.requestSync("sync", true)
-    });
-
-    this.addCommand({
-      id: "vault-sync-pull",
-      name: "Pull from GitHub",
-      callback: () => this.requestSync("pull", true)
-    });
-
-    this.addCommand({
-      id: "vault-sync-push",
-      name: "Push to GitHub",
-      callback: () => this.requestSync("push", true)
+      callback: () => this.requestSync(true)
     });
 
     this.addCommand({
@@ -573,7 +543,7 @@ export default class VaultSyncPlugin extends Plugin {
     }
     return this.eventIgnoreMatcher.ignores(normalizeVaultPath(path));
   }
-  private showSyncNotice(result: SyncResult, mode: SyncMode): void {
+  private showSyncNotice(result: SyncResult): void {
     const changes =
       result.uploaded +
       result.downloaded +
@@ -617,19 +587,6 @@ export default class VaultSyncPlugin extends Plugin {
 
     return error.message;
   }
-}
-
-function mergeModes(current: SyncMode | null, next: SyncMode): SyncMode {
-  if (!current) {
-    return next;
-  }
-  if (current === "sync" || next === "sync") {
-    return "sync";
-  }
-  if (current !== next) {
-    return "sync";
-  }
-  return current;
 }
 
 function normalizeVaultPath(path: string): string {
