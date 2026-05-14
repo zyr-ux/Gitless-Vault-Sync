@@ -28,23 +28,23 @@ This CSS file is loaded when the plugin is enabled.
   width: 30em;
 }
 
-.vault-sync-spinner {
+.gitless-vault-sync-spinner {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.vault-sync-spinner::after {
+.gitless-vault-sync-spinner::after {
   content: "";
   width: 12px;
   height: 12px;
   border: 2px solid var(--text-muted);
   border-top-color: transparent;
   border-radius: 50%;
-  animation: vault-sync-spin 1s linear infinite;
+  animation: gitless-vault-sync-spin 1s linear infinite;
 }
 
-@keyframes vault-sync-spin {
+@keyframes gitless-vault-sync-spin {
   to {
     transform: rotate(360deg);
   }
