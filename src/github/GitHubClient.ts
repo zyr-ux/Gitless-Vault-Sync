@@ -125,9 +125,10 @@ export class GitHubClient {
   }
 
   async getBranchRef(): Promise<string> {
+    const timestamp = Date.now();
     const ref = await this.request<{ object: { sha: string } }>(
       "GET",
-      await this.buildPath(`/git/ref/heads/${encodeURIComponent(this.branch)}`)
+      await this.buildPath(`/git/ref/heads/${encodeURIComponent(this.branch)}?t=${timestamp}`)
     );
     return ref.object.sha;
   }
@@ -391,7 +392,10 @@ export class GitHubClient {
   ): Promise<T> {
     const headers: Record<string, string> = {
       Accept: "application/vnd.github+json",
-      "X-GitHub-Api-Version": "2022-11-28"
+      "X-GitHub-Api-Version": "2022-11-28",
+      "Cache-Control": "no-cache, no-store, must-revalidate",
+      Pragma: "no-cache",
+      Expires: "0"
     };
 
     if (this.token) {
