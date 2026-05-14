@@ -16,7 +16,7 @@ export interface VaultSyncSettings {
   ignorePatterns: string[];
   noticeLevel: NoticeLevelSetting;
   showSyncSuccessNotice: boolean;
-  syncOnStart: boolean;
+  autoSync: boolean;
 }
 
 export const DEFAULT_SETTINGS: VaultSyncSettings = {
@@ -39,7 +39,7 @@ export const DEFAULT_SETTINGS: VaultSyncSettings = {
   ],
   noticeLevel: "ALL",
   showSyncSuccessNotice: true,
-  syncOnStart: true
+  autoSync: true
 };
 
 export class VaultSyncSettingTab extends PluginSettingTab {
@@ -183,13 +183,13 @@ export class VaultSyncSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Auto sync on startup")
-      .setDesc("Automatically sync with remote when Obsidian starts.")
+      .setName("Auto sync")
+      .setDesc("Enable all automatic synchronization triggers (startup, edits, and interval).")
       .addToggle((toggle) =>
         toggle
-          .setValue(this.plugin.settings.syncOnStart)
+          .setValue(this.plugin.settings.autoSync)
           .onChange(async (value) => {
-            this.plugin.settings.syncOnStart = value;
+            this.plugin.settings.autoSync = value;
             await this.plugin.saveSettings();
           })
       );

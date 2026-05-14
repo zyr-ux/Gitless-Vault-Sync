@@ -50,7 +50,7 @@ export default class VaultSyncPlugin extends Plugin {
     this.initializeSync();
     this.registerVaultEvents();
     this.startAutoPull();
-    if (this.settings.syncOnStart) {
+    if (this.settings.autoSync) {
       this.requestSync();
     } else {
       // Suppression of the immediate foreground pull from the initial active-leaf-change event.
@@ -187,7 +187,7 @@ export default class VaultSyncPlugin extends Plugin {
   }
 
   private requestForegroundPull(): void {
-    if (this.settings.syncIntervalSec <= 0 || !this.isConfigured()) {
+    if (!this.settings.autoSync || this.settings.syncIntervalSec <= 0 || !this.isConfigured()) {
       return;
     }
 
@@ -235,13 +235,14 @@ export default class VaultSyncPlugin extends Plugin {
 
   private shouldAutoPull(): boolean {
     return (
+      this.settings.autoSync &&
       this.settings.syncIntervalSec > 0 &&
       this.isConfigured()
     );
   }
 
   private schedulePush(): void {
-    if (!this.isConfigured()) {
+    if (!this.settings.autoSync || !this.isConfigured()) {
       return;
     }
 
@@ -253,9 +254,11 @@ export default class VaultSyncPlugin extends Plugin {
       window.clearTimeout(this.debounceTimer);
     }
 
-    this.debounceTimer = window.setTimeout(() => {
+    this.debounceTimer = window.setTimeout(async () => {
       this.debounceTimer = null;
-      this.requestSync();
+      if (this.syncEngine && (await this.syncEngine.hasLocalChanges())) {
+        this.requestSync();
+      }
     }, this.settings.debounceMs);
   }
 

@@ -19,6 +19,20 @@ const MAX_BLOB_BYTES = 100 * 1024 * 1024;
 const MAX_PUSH_RETRIES = 2;
 const MAX_FILE_IO_CONCURRENCY = 3;
 const HASH_THRESHOLD_BYTES = 25 * 1024 * 1024;
+const ALWAYS_IGNORE = [
+  ".obsidian/workspace",
+  ".obsidian/workspace.json",
+  ".obsidian/workspace-mobile.json",
+  ".obsidian/cache",
+  ".obsidian/logs",
+  ".git/**",
+  ".stfolder/**",
+  ".vault-sync-init",
+  ".trash",
+  ".DS_Store",
+  ".obsidian/plugins/vault-sync/data.json",
+  ".obsidian/plugins/**/data.json"
+];
 
 export interface SyncResult {
   uploaded: number;
@@ -92,26 +106,23 @@ export class SyncEngine {
     return this.runSync({ allowPull: true, allowPush: true });
   }
 
+  async hasLocalChanges(): Promise<boolean> {
+    return this.indexStore.readIndex(async (index) => {
+      const userIgnorePatterns = (this.settings.ignorePatterns ?? []).filter(
+        (pattern) => !isObsidianPattern(pattern)
+      );
+      const ignorePatterns = [...ALWAYS_IGNORE, ...userIgnorePatterns];
+      const ignore = new IgnoreMatcher(ignorePatterns);
+      return this.detectLocalChanges(index, ignore);
+    });
+  }
+
   async hasPendingChanges(options: {
     allowPull: boolean;
     allowPush: boolean;
   }): Promise<boolean> {
     return this.indexStore.readIndex(async (baseIndex) => {
       const now = Date.now();
-      const ALWAYS_IGNORE = [
-        ".obsidian/workspace",
-        ".obsidian/workspace.json",
-        ".obsidian/workspace-mobile.json",
-        ".obsidian/cache",
-        ".obsidian/logs",
-        ".git/**",
-        ".stfolder/**",
-        ".vault-sync-init",
-        ".trash",
-        ".DS_Store",
-        ".obsidian/plugins/vault-sync/data.json",
-        ".obsidian/plugins/**/data.json"
-      ];
       const userIgnorePatterns = (this.settings.ignorePatterns ?? []).filter(
         (pattern) => !isObsidianPattern(pattern)
       );
@@ -146,21 +157,6 @@ export class SyncEngine {
 
     return this.indexStore.withIndex(async (baseIndex) => {
       const now = Date.now();
-      // Hardcode critical ignores since the UI is hidden for now
-      const ALWAYS_IGNORE = [
-        ".obsidian/workspace",
-        ".obsidian/workspace.json",
-        ".obsidian/workspace-mobile.json",
-        ".obsidian/cache",
-        ".obsidian/logs",
-        ".git/**",
-        ".stfolder/**",
-        ".vault-sync-init",
-        ".trash",
-        ".DS_Store",
-        ".obsidian/plugins/vault-sync/data.json",
-        ".obsidian/plugins/**/data.json"
-      ];
       const userIgnorePatterns = (this.settings.ignorePatterns ?? []).filter(
         (pattern) => !isObsidianPattern(pattern)
       );
@@ -779,7 +775,7 @@ export class SyncEngine {
     return results;
   }
 
-  private async detectLocalChanges(
+  public async detectLocalChanges(
     index: SyncIndexState,
     ignore: IgnoreMatcher
   ): Promise<boolean> {
