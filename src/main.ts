@@ -488,7 +488,7 @@ export default class GitlessVaultSyncPlugin extends Plugin {
         entry.deletedLocally = true;
         entry.localDeletedAt = Date.now();
       }
-    });
+    }, false);
   }
 
   private async markRenamed(file: TFile, oldPath: string): Promise<void> {
@@ -519,7 +519,7 @@ export default class GitlessVaultSyncPlugin extends Plugin {
         newEntry.deletedLocally = false;
         newEntry.localDeletedAt = undefined;
       }
-    });
+    }, false);
   }
 
   private rebuildEventIgnoreMatcher(): void {
@@ -558,7 +558,7 @@ export default class GitlessVaultSyncPlugin extends Plugin {
         entry.deletedLocally = false;
         entry.localDeletedAt = undefined;
       }
-    });
+    }, false);
   }
 
   private shouldIgnorePath(path: string | null | undefined): boolean {

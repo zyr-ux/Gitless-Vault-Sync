@@ -28,22 +28,46 @@ const EMPTY_INDEX: SyncIndexState = { entries: {}, lastKnownRemoteHeadSha: "" };
 export class IndexStore {
   private plugin: Plugin;
   private queue: Promise<void> = Promise.resolve();
+  private cachedIndex: SyncIndexState | null = null;
+  private saveTimeout: number | null = null;
 
   constructor(plugin: Plugin) {
     this.plugin = plugin;
   }
 
   async load(): Promise<SyncIndexState> {
+    if (this.cachedIndex) {
+      return this.cachedIndex;
+    }
     const raw = await this.plugin.loadData();
     const index = normalizePluginData(raw, DEFAULT_SETTINGS).index;
+    this.cachedIndex = index;
     return index;
   }
 
-  async save(index: SyncIndexState): Promise<void> {
-    const raw = await this.plugin.loadData();
-    const data = normalizePluginData(raw, DEFAULT_SETTINGS);
-    data.index = index;
-    await this.plugin.saveData(data);
+  async save(index: SyncIndexState, immediate = true): Promise<void> {
+    this.cachedIndex = index;
+
+    if (this.saveTimeout) {
+      window.clearTimeout(this.saveTimeout);
+      this.saveTimeout = null;
+    }
+
+    const performSave = async (): Promise<void> => {
+      const raw = await this.plugin.loadData();
+      const data = normalizePluginData(raw, DEFAULT_SETTINGS);
+      data.index = index;
+      await this.plugin.saveData(data);
+    };
+
+    if (immediate) {
+      await performSave();
+    } else {
+      this.saveTimeout = window.setTimeout(() => {
+        this.saveTimeout = null;
+        void this.queue.then(() => performSave());
+      }, 2000) as unknown as number;
+    }
   }
 
   /**
@@ -52,24 +76,20 @@ export class IndexStore {
    * relative to other withIndex calls.
    */
   async withIndex<T>(
-    callback: (index: SyncIndexState) => Promise<T>
+    callback: (index: SyncIndexState) => Promise<T>,
+    immediate = true
   ): Promise<T> {
     return new Promise((resolve, reject) => {
-      this.queue = this.queue
-        .then(async () => {
-          try {
-            const index = await this.load();
-            const result = await callback(index);
-            await this.save(index);
-            resolve(result);
-          } catch (error) {
-            reject(error);
-          }
-        })
-        .catch((error) => {
-          // Ensure the queue continues even if one operation fails
+      this.queue = this.queue.then(async () => {
+        try {
+          const index = await this.load();
+          const result = await callback(index);
+          await this.save(index, immediate);
+          resolve(result);
+        } catch (error) {
           reject(error);
-        });
+        }
+      });
     });
   }
 
