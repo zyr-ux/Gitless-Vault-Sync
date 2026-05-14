@@ -721,8 +721,16 @@ export class SyncEngine {
       treeEntries
     );
     const parents = snapshot.commitSha ? [snapshot.commitSha] : [];
-    const message = `Gitless Vault Sync: edited by ${this.settings.deviceName || detectDeviceName()
-      }`;
+    const device = this.settings.deviceName || detectDeviceName();
+    const date = new Date().toLocaleString(undefined, {
+      year: "numeric",
+      month: "numeric",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true
+    });
+    const message = `Edited by ${device} on ${date}`;
     const commitSha = await this.client.createCommit(message, treeSha, parents);
 
     try {
