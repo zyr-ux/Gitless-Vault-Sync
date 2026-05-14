@@ -136,6 +136,9 @@ export class SyncEngine {
     this.client.resetCommitChain();
 
     return this.indexStore.withIndex(async (baseIndex) => {
+      const count = Object.keys(baseIndex.entries).length;
+      console.warn(`[Sync] Starting sync with ${count} indexed files`);
+
       const now = Date.now();
       const ignore = this.getIgnoreMatcher();
 

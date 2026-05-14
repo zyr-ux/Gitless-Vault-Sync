@@ -36,8 +36,6 @@ export class IndexStore {
   async load(): Promise<SyncIndexState> {
     const raw = await this.plugin.loadData();
     const index = normalizePluginData(raw, DEFAULT_SETTINGS).index;
-    const count = Object.keys(index.entries).length;
-    console.warn(`[Sync] Index load: ${count} entries`);
     return index;
   }
 
@@ -46,8 +44,6 @@ export class IndexStore {
     const data = normalizePluginData(raw, DEFAULT_SETTINGS);
     data.index = index;
     await this.plugin.saveData(data);
-    const count = Object.keys(index.entries).length;
-    console.warn(`[Sync] Index save: ${count} entries`);
   }
 
   /**
