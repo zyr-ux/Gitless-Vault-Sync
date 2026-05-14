@@ -314,7 +314,7 @@ export default class GitlessVaultSyncPlugin extends Plugin {
     this.syncInFlight = true;
     this.suppressAutoPush = true;
 
-    if (shouldNotify && Platform.isDesktop) {
+    if (shouldNotify) {
       this.showSyncingNotice();
     }
 
@@ -419,7 +419,7 @@ export default class GitlessVaultSyncPlugin extends Plugin {
   }
 
   private showSyncingNotice(): void {
-    if (!Platform.isDesktop || this.syncingNotice) {
+    if (this.syncingNotice) {
       return;
     }
 
