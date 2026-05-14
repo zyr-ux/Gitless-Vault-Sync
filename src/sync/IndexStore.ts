@@ -3,11 +3,11 @@ import { DEFAULT_SETTINGS, type VaultSyncSettings } from "../settings";
 
 export interface SyncIndexEntry {
   path: string;
-  remoteSha: string;
+  remoteSha: string | null;
   lastSynced: number;
   lastRemoteCommitTime: number;
   localMtime: number;
-  localHash: string;
+  localHash: string | null;
   size: number;
   deletedLocally?: boolean;
   localDeletedAt?: number;
@@ -139,11 +139,11 @@ function normalizeIndex(raw: unknown): SyncIndexState {
 
     entries[path] = {
       path,
-      remoteSha: String(value.remoteSha ?? ""),
+      remoteSha: value.remoteSha ? String(value.remoteSha) : null,
       lastSynced: numberOrZero(value.lastSynced),
       lastRemoteCommitTime: numberOrZero(value.lastRemoteCommitTime),
       localMtime: numberOrZero(value.localMtime),
-      localHash: String(value.localHash ?? ""),
+      localHash: value.localHash ? String(value.localHash) : null,
       size: numberOrZero(value.size),
       deletedLocally: value.deletedLocally === true,
       localDeletedAt: value.localDeletedAt
@@ -154,7 +154,7 @@ function normalizeIndex(raw: unknown): SyncIndexState {
 
   return {
     entries,
-    lastKnownRemoteHeadSha: String(raw.lastKnownRemoteHeadSha ?? "")
+    lastKnownRemoteHeadSha: raw.lastKnownRemoteHeadSha ? String(raw.lastKnownRemoteHeadSha) : ""
   };
 }
 
@@ -183,11 +183,11 @@ export function ensureEntry(
 
   const entry: SyncIndexEntry = {
     path,
-    remoteSha: "",
+    remoteSha: null,
     lastSynced: 0,
     lastRemoteCommitTime: 0,
     localMtime: 0,
-    localHash: "",
+    localHash: null,
     size: 0,
     ...initial
   };

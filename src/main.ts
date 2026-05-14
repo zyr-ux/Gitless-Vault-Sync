@@ -565,15 +565,10 @@ export default class VaultSyncPlugin extends Plugin {
   }
 
   private shouldIgnorePath(path: string | null | undefined): boolean {
-    if (!path) {
+    if (!path || !this.eventIgnoreMatcher) {
       return false;
     }
-    if (!this.eventIgnoreMatcher) {
-      this.rebuildEventIgnoreMatcher();
-    }
-    return this.eventIgnoreMatcher
-      ? this.eventIgnoreMatcher.ignores(normalizeVaultPath(path))
-      : false;
+    return this.eventIgnoreMatcher.ignores(normalizeVaultPath(path));
   }
   private showSyncNotice(result: SyncResult, mode: SyncMode): void {
     const changes =

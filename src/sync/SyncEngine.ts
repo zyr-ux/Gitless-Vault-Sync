@@ -437,7 +437,7 @@ export class SyncEngine {
 
         const remoteChanged = entry.remoteSha !== remote.sha;
         const deleteTime = entry.localDeletedAt ?? now;
-        const adjustedDeleteTime = deleteTime - clockSkewMs;
+        const adjustedDeleteTime = Math.max(0, deleteTime - clockSkewMs);
 
         if (remoteChanged && snapshot.commitTime > adjustedDeleteTime) {
           entry.deletedLocally = false;
@@ -453,7 +453,7 @@ export class SyncEngine {
       const remoteChanged = entry.remoteSha !== remote.sha;
 
       if (remoteChanged && localChanged) {
-        const adjustedLocalMtime = local.stat.mtime - clockSkewMs;
+        const adjustedLocalMtime = Math.max(0, local.stat.mtime - clockSkewMs);
         if (adjustedLocalMtime >= snapshot.commitTime) {
           queueUpload(local);
         } else {
@@ -509,7 +509,7 @@ export class SyncEngine {
               continue;
             }
           }
-          const adjustedLocalMtime = local.stat.mtime - clockSkewMs;
+          const adjustedLocalMtime = Math.max(0, local.stat.mtime - clockSkewMs);
           if (adjustedLocalMtime >= snapshot.commitTime) {
             queueUpload(local);
           } else {
