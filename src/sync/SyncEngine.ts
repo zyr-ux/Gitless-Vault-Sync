@@ -709,7 +709,7 @@ export class SyncEngine {
     }
 
     if (invalidTreePaths.length > 0) {
-      console.warn("Vault Sync: skipped invalid tree paths", invalidTreePaths);
+      console.warn("Gitless Vault Sync: skipped invalid tree paths", invalidTreePaths);
     }
 
     if (treeEntries.length === 0) {
@@ -721,7 +721,7 @@ export class SyncEngine {
       treeEntries
     );
     const parents = snapshot.commitSha ? [snapshot.commitSha] : [];
-    const message = `Vault Sync: edited by ${this.settings.deviceName || detectDeviceName()
+    const message = `Gitless Vault Sync: edited by ${this.settings.deviceName || detectDeviceName()
       }`;
     const commitSha = await this.client.createCommit(message, treeSha, parents);
 
@@ -830,7 +830,7 @@ export class SyncEngine {
     }
 
     if (invalidPaths.length > 0) {
-      console.warn("Vault Sync: skipped invalid paths", invalidPaths);
+      console.warn("Gitless Vault Sync: skipped invalid paths", invalidPaths);
     }
 
     return Array.from(results);

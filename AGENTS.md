@@ -13,7 +13,7 @@ For full contribution rules, conventions, and setup instructions, read **[CONTRI
 | `src/main.ts` | Plugin entry point — owns lifecycle, event registration, sync queue |
 | `src/settings.ts` | Settings schema and defaults — any new setting must be added here |
 | `src/github/GitHubClient.ts` | All GitHub REST API calls — do not call `fetch` directly anywhere else |
-| `src/sync/SyncEngine.ts` | Core sync logic — three-way merge, conflict resolution, push batching |
+| `src/sync/SyncEngine.ts` | Core sync logic — three-way merge, conflict resolution, sync batching |
 | `src/sync/IndexStore.ts` | Sync index schema and persistence — do not read/write `data.json` outside this class |
 | `src/sync/IgnoreMatcher.ts` | Glob-to-regex path filtering |
 | `ARCHITECTURE.md` | Deep-dive into module architecture, data flow, and the release workflow |
@@ -56,4 +56,4 @@ GitlessVaultSyncPlugin (orchestration)
         └── IgnoreMatcher (path filtering)
 ```
 
-Settings and the sync index are co-persisted in Obsidian's `data.json` under a single `{ settings, index }` envelope. See [ARCHITECTURE.md](ARCHITECTURE.md) for full details including the sync algorithm, conflict resolution rules, and the push batching strategy.
+Settings and the sync index are co-persisted in Obsidian's `data.json` under a single `{ settings, index }` envelope. See [ARCHITECTURE.md](ARCHITECTURE.md) for full details including the sync algorithm, conflict resolution rules, and the sync batching strategy.

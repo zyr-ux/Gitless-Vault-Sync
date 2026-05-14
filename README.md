@@ -18,9 +18,9 @@ Gitless Vault Sync is an Obsidian community plugin that syncs your vault to a pr
 - [Usage](#usage)
   - [Ribbon Icon](#ribbon-icon)
   - [Command Palette](#command-palette)
-  - [Auto-Push on Edit](#auto-push-on-edit)
-  - [Auto-Pull on Interval](#auto-pull-on-interval)
-  - [Sync on Startup](#sync-on-startup)
+  - [Auto Sync on Edit](#auto-sync-on-edit)
+  - [Auto Sync Interval](#auto-sync-interval)
+  - [Auto Sync on Startup](#auto-sync-on-startup)
 - [Settings Reference](#settings-reference)
 - [Sync Logic](#sync-logic)
   - [Conflict Resolution](#conflict-resolution)
@@ -37,9 +37,9 @@ Gitless Vault Sync is an Obsidian community plugin that syncs your vault to a pr
 
 - **Bi-directional sync** — push local changes and pull remote changes in one operation
 - **No Git required** — communicates with GitHub via the REST API; works on mobile too
-- **Auto-push on edit** — debounced push is triggered automatically when you save a file
-- **Auto-pull on interval** — configurable background polling to pull remote changes
-- **Sync on startup** — optionally pull from remote as soon as Obsidian loads
+- **Auto sync on edit** — debounced sync is triggered automatically when you save a file
+- **Auto sync interval** — configurable background polling to keep your vault in sync
+- **Auto sync on startup** — optionally sync with remote as soon as Obsidian loads
 - **Repository path prefix** — store your vault inside a subfolder of the repo
 - **Configurable notice levels** — suppress noisy notifications during background sync
 - **Cross-platform** — tested on Windows, macOS, Linux, iOS, and Android
@@ -50,7 +50,7 @@ Gitless Vault Sync is an Obsidian community plugin that syncs your vault to a pr
 
 ## How It Works
 
-Vault Sync maintains a local **sync index** (stored in `data.json`) that tracks which files have been synced and their last-known remote SHA. On each sync, it:
+Gitless Vault Sync maintains a local **sync index** (stored in `data.json`) that tracks which files have been synced and their last-known remote SHA. On each sync, it:
 
 1. Fetches the latest commit and file tree from GitHub
 2. Compares local files against the remote snapshot and the index
@@ -60,7 +60,7 @@ Vault Sync maintains a local **sync index** (stored in `data.json`) that tracks 
 
 This approach is fast, atomic on the push side, and works without ever calling `git` locally.
 
-When multiple devices push around the same time, Vault Sync retries on non-fast-forward errors and re-plans the sync so it can complete cleanly without leaving partial state.
+When multiple devices sync around the same time, Gitless Vault Sync retries on non-fast-forward errors and re-plans the sync so it can complete cleanly without leaving partial state.
 
 ---
 
@@ -139,30 +139,28 @@ Open the command palette (`Ctrl/Cmd + P`) and search for **Gitless Vault Sync** 
 
 | Command | Description |
 |---|---|
-| `Gitless Vault Sync: Sync now` | Pull remote changes and push local changes |
-| `Gitless Vault Sync: Pull from GitHub` | Pull-only — download remote changes, make no local uploads |
-| `Gitless Vault Sync: Push to GitHub` | Push-only — upload local changes, make no remote downloads |
+| `Gitless Vault Sync: Sync now` | Full bidirectional sync (pull + push) |
 | `Gitless Vault Sync: Open Gitless Vault Sync settings` | Open the settings tab directly |
 
-### Auto-Push on Edit
+### Auto Sync on Edit
 
-Whenever you **create, modify, delete, or rename** a file in your vault, a push is automatically scheduled. There is a configurable **debounce delay** (default: 3 seconds) to batch rapid edits into a single upload instead of pushing on every keystroke.
+Whenever you **create, modify, delete, or rename** a file in your vault, a sync is automatically scheduled. There is a configurable **debounce delay** (default: 3 seconds) to batch rapid edits into a single sync instead of syncing on every keystroke.
 
 > [!NOTE]
-> The debounce window restarts on each file event. A push only fires after the delay passes with no further changes.
+> The debounce window restarts on each file event. A sync only fires after the delay passes with no further changes.
 
-### Auto-Pull on Interval
+### Auto Sync Interval
 
-Set **Auto-pull interval (sec)** in settings to a positive number (e.g. `60` for every minute). The plugin will silently poll for remote changes on that interval, keeping your vault in sync across devices.
+Set **Auto sync interval (sec)** in settings to a positive number (e.g. `60` for every minute). The plugin will silently perform a full sync on that interval, keeping your vault up to date across devices.
 
 Set the value to `0` to disable automatic polling.
 
 > [!NOTE]
-> Auto-pull runs quietly in the background and does not show the manual sync spinner.
+> Background syncs run quietly and do not show the manual sync spinner.
 
-### Sync on Startup
+### Auto Sync on Startup
 
-Enable **Auto sync on startup** to automatically pull from GitHub when Obsidian loads. This is useful when switching between devices — your vault will be up to date before you start editing.
+Enable **Auto sync on startup** to automatically sync with GitHub when Obsidian loads. This ensures your vault is up to date before you start editing.
 
 ---
 
@@ -176,7 +174,7 @@ Enable **Auto sync on startup** to automatically pull from GitHub when Obsidian 
 | **Branch** | `main` | Branch to sync against |
 | **Repository path prefix** | *(empty)* | Subfolder within the repo (e.g. `notes/`). Leave blank for root. |
 | **Device name** | *(auto)* | Label in commit messages. Auto-detected if blank. |
-| **Auto-pull interval (sec)** | `60` | Seconds between background pulls. `0` disables polling. |
+| **Auto sync interval (sec)** | `60` | Seconds between background syncs. `0` disables polling. |
 | **Notice level** | `ALL` | Controls which notices are shown: `ALL`, `WARNING`, or `ERROR` |
 | **Hide Success Message** | Off | Suppress the confirmation notice after a successful sync |
 | **Auto sync on startup** | On | Pull from remote when Obsidian starts |
@@ -270,10 +268,10 @@ The key differences in Vault Sync are:
 
 - Uses the **GitHub REST API** directly (no local Git binary needed — works on mobile)
 - Maintains a **local sync index** for smarter conflict and deletion handling
-- Supports **auto-push on edit** with a debounce window
+- Supports **auto sync on edit** with a debounce window
 - Supports storing the vault in a **repository subfolder**
 - Auto-detects the **repository owner** from the PAT (no need to fill it in manually)
-- Auto-initializes **empty repositories** on the first push
+- Auto-initializes **empty repositories** on the first sync
 
 ---
 

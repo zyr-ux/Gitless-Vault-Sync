@@ -1,6 +1,6 @@
 # Gitless Vault Sync — Architecture
 
-This document describes the internal architecture of the Vault Sync Obsidian plugin and the automated release workflow used to build and publish new versions.
+This document describes the internal architecture of the Gitless Vault Sync Obsidian plugin and the automated release workflow used to build and publish new versions.
 
 ---
 
@@ -19,8 +19,8 @@ This document describes the internal architecture of the Vault Sync Obsidian plu
    - [Plugin Startup](#plugin-startup)
    - [Sync Lifecycle](#sync-lifecycle)
    - [Conflict Resolution](#conflict-resolution)
-   - [Push Path (Upload)](#push-path-upload)
-   - [Pull Path (Download)](#pull-path-download)
+   - [Upload Path](#upload-path)
+   - [Download Path](#download-path)
 5. [Versioning Files](#versioning-files)
 6. [Build System](#build-system)
 7. [Release Workflow](#release-workflow)
@@ -97,25 +97,15 @@ Gitless Vault Sync/
 - **Instantiating subsystems** — creates `IndexStore`, `GitHubClient`, and `SyncEngine`.
 - **Registering Obsidian hooks:**
   - Ribbon icon (GitHub icon) → triggers `sync` mode.
-  - Commands: `Sync now`, `Pull from GitHub`, `Push to GitHub`, `Open Gitless Vault Sync settings`.
-  - Vault events: `modify`, `create`, `delete`, `rename` on any `TFile` → triggers debounced push.
-- **Auto-pull timer** — starts a `setInterval` that fires a pull on the configured interval (default 60 s). Restarted any time settings change.
-- **Sync-on-start** — if `syncOnStart` is enabled, queues a pull immediately after load.
-- **Foreground pull** — on mobile, a pull is requested when Obsidian becomes active again (debounced) to compensate for background timer throttling.
+  - Commands: `Sync now`, `Open Gitless Vault Sync settings`.
+  - Vault events: `modify`, `create`, `delete`, `rename` on any `TFile` → triggers debounced sync.
+- **Auto sync timer** — starts a `setInterval` that fires a sync on the configured interval (default 300 s). Restarted any time settings change.
+- **Auto sync on startup** — if `autoSync` is enabled, queues a sync immediately after load.
+- **Foreground sync** — on mobile, a sync is requested when Obsidian becomes active again (debounced) to ensure the vault is fresh.
 
 #### Sync request queuing
 
-To avoid concurrent syncs, the plugin uses a simple in-flight guard with a pending-mode queue:
-
-```
-requestSync(mode)
-  └─ mergeModes(pendingMode, mode) → "sync" wins over "push"/"pull"
-       └─ runNextSync()
-             ├─ if syncInFlight → return (will retry in finally block)
-             └─ set syncInFlight = true → call SyncEngine → finally { syncInFlight = false; runNextSync() }
-```
-
-`mergeModes` promotes any conflicting pair to `"sync"` (bidirectional) — e.g. if a pull is pending and a push arrives, it becomes a full sync.
+To avoid concurrent syncs, the plugin uses a simple in-flight guard with a pending-mode queue. Since all operations (interval, edit-triggered, manual) are consolidated into bidirectional sync, the queuing ensures that if a sync is requested while another is in progress, one more sync will run once the current one finishes.
 
 ---
 
@@ -133,12 +123,12 @@ requestSync(mode)
 | `branch` | `string` | `"main"` | Branch to sync against |
 | `repoPathPrefix` | `string` | `""` | Optional subfolder in the repo root |
 | `deviceName` | `string` | `""` | Used in commit messages; auto-detected if blank |
-| `debounceMs` | `number` | `3000` | Delay after last file change before auto-push |
-| `syncIntervalSec` | `number` | `60` | Auto-pull interval; `0` disables |
+| `debounceMs` | `number` | `3000` | Delay after last file change before auto-sync |
+| `syncIntervalSec` | `number` | `300` | Auto sync interval; `0` disables |
 | `ignorePatterns` | `string[]` | (see below) | Gitignore-style paths to exclude |
 | `noticeLevel` | `"ALL"\|"WARNING"\|"ERROR"` | `"ALL"` | Controls which Obsidian notices are shown |
 | `showSyncSuccessNotice` | `boolean` | `true` | Whether a success toast is shown |
-| `syncOnStart` | `boolean` | `true` | Pull on Obsidian startup |
+| `autoSync` | `boolean` | `true` | Enable all automatic sync triggers |
 
 **Default ignore patterns:** `.obsidian/workspace`, `.obsidian/workspace.json`, `.obsidian/workspace-mobile.json`, `.obsidian/cache`, `.obsidian/logs`, `.trash`, `.DS_Store`
 
@@ -197,12 +187,10 @@ The client retries on rate-limited responses (429/403 with reset headers) with a
 
 The `SyncEngine` is the brain of the plugin. It implements a three-way merge between the **local vault**, the **remote Git tree**, and a **local sync index** (the last known agreed-upon state).
 
-The three public methods are thin wrappers over a single private `runSync(options)`:
+The main entry point is the public `sync()` method, which performs a full bidirectional reconciliation:
 
 ```ts
-sync()  → runSync({ allowPull: true,  allowPush: true  })
-pull()  → runSync({ allowPull: true,  allowPush: false })
-push()  → runSync({ allowPull: false, allowPush: true  })
+sync() → runSync()
 ```
 
 #### Always-ignore list
@@ -222,15 +210,15 @@ Regardless of user settings, these paths are always excluded from sync:
 
 #### Empty repository bootstrap
 
-If `getRemoteSnapshot()` returns an empty result (404 or 409 on a brand-new repo) and a push is allowed, `initializeRepository()` is called to create a placeholder `.gitless-vault-sync-init` file so the branch and first commit exist. The init file is then queued for deletion in the same sync run.
+If `getRemoteSnapshot()` returns an empty result (404 or 409 on a brand-new repo) and a sync is allowed, `initializeRepository()` is called to create a placeholder `.gitless-vault-sync-init` file so the branch and first commit exist. The init file is then queued for deletion in the same sync run.
 
-#### Push retry
+#### Sync retry
 
-Pushes are prepared from a snapshot of the remote tree. If the branch advances during the push, `updateBranchRef` returns a non-fast-forward error. The engine treats this as a stale-head signal, re-fetches the snapshot, re-plans, and retries a small number of times.
+Syncs are prepared from a snapshot of the remote tree. If the branch advances during the sync, `updateBranchRef` returns a non-fast-forward error. The engine treats this as a stale-head signal, re-fetches the snapshot, re-plans, and retries a small number of times.
 
 #### Incremental index saves
 
-The index is persisted after successful push work and incrementally after downloads/deletions. This avoids losing partial work if the sync is interrupted.
+The index is persisted after successful sync work and incrementally after downloads/deletions. This avoids losing partial work if the sync is interrupted.
 
 #### Concurrency
 
@@ -290,9 +278,9 @@ onload()
   ├─ registerCommands()
   ├─ addRibbonIcon()
   ├─ initializeSync()                  → new IndexStore, GitHubClient, SyncEngine
-  ├─ registerVaultEvents()             → modify/create/delete/rename → schedulePush()
-  ├─ startAutoPull()                   → setInterval → requestSync("pull")
-  └─ if syncOnStart → requestSync("pull")
+  ├─ registerVaultEvents()             → modify/create/delete/rename → scheduleSync()
+  ├─ startAutoSync()                   → setInterval → requestSync()
+  └─ if autoSync → requestSync()
 ```
 
 ### Sync Lifecycle
@@ -304,7 +292,7 @@ requestSync(mode)
              ├─ guard: syncInFlight? → return
              ├─ capture and clear pendingMode
              ├─ syncInFlight = true
-             ├─ SyncEngine.pull() / push() / sync()
+             ├─ SyncEngine.sync()
              │     └─ runSync(options)
              │           ├─ load IndexStore
              │           ├─ collectLocalFiles (filtered by IgnoreMatcher)
@@ -339,7 +327,7 @@ For files **not in the index** at all:
 - Local-only → upload
 - Both present, no index → use last-write-wins on `mtime` vs `commitTime`
 
-### Push Path (Upload)
+### Upload Path
 
 All uploads in a single sync run are batched into **one commit**:
 
@@ -351,7 +339,7 @@ All uploads in a single sync run are batched into **one commit**:
 
 This means N file changes = exactly 1 commit, regardless of file count.
 
-### Pull Path (Download)
+### Download Path
 
 Downloads are executed file-by-file:
 1. `GET /git/blobs/{sha}` → returns `{ content, encoding }`
@@ -443,4 +431,4 @@ Gitless-Vault-Sync-v1.0.0.zip
     └── versions.json    ← version compatibility history
 ```
 
-Users install by extracting the zip into `.obsidian/plugins/` in their vault. The `vault-sync` folder name matches the plugin `id` field in `manifest.json`, which is the directory name Obsidian uses to load the plugin.
+Users install by extracting the zip into `.obsidian/plugins/` in their vault. The `gitless-vault-sync` folder name matches the plugin `id` field in `manifest.json`, which is the directory name Obsidian uses to load the plugin.
