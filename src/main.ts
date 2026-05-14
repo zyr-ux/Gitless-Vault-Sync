@@ -561,7 +561,7 @@ export default class GitlessVaultSyncPlugin extends Plugin {
     }
 
     if (changes === 0 && result.skipped === 0) {
-      this.showNotice(`Gitless Vault Sync: No changes.`, "INFO");
+      this.showNotice(`No changes.`, "INFO");
       return;
     }
 
@@ -570,11 +570,11 @@ export default class GitlessVaultSyncPlugin extends Plugin {
         console.warn("Gitless Vault Sync skipped files:", result.skippedFiles);
       }
       this.showNotice(
-        `Gitless Vault Sync: Sync successful (${result.skipped} files skipped).`,
+        `Sync successful (${result.skipped} files skipped).`,
         severity
       );
     } else {
-      this.showNotice(`Gitless Vault Sync: Sync successful.`, severity);
+      this.showNotice(`Sync successful.`, severity);
     }
   }
 
