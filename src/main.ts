@@ -149,6 +149,7 @@ export default class GitlessVaultSyncPlugin extends Plugin {
             return;
           }
           this.schedulePush();
+          void this.markCreated(file);
         }
       })
     );
@@ -482,9 +483,11 @@ export default class GitlessVaultSyncPlugin extends Plugin {
 
     await this.indexStore.withIndex(async (index) => {
       const path = normalizeVaultPath(file.path);
-      const entry = ensureEntry(index, path);
-      entry.deletedLocally = true;
-      entry.localDeletedAt = Date.now();
+      const entry = index.entries[path];
+      if (entry) {
+        entry.deletedLocally = true;
+        entry.localDeletedAt = Date.now();
+      }
     });
   }
 
@@ -505,16 +508,17 @@ export default class GitlessVaultSyncPlugin extends Plugin {
       if (oldEntry) {
         oldEntry.deletedLocally = true;
         oldEntry.localDeletedAt = oldEntry.localDeletedAt ?? now;
-      } else {
-        const entry = ensureEntry(index, normalizedOldPath);
-        entry.deletedLocally = true;
-        entry.localDeletedAt = now;
-      }
 
-      const newEntry = ensureEntry(index, normalizedNewPath);
-      newEntry.localMtime = file.stat.mtime;
-      newEntry.deletedLocally = false;
-      newEntry.localDeletedAt = undefined;
+        // Carry over the entry to the new path if it was already synced
+        const newEntry = ensureEntry(index, normalizedNewPath, {
+          remoteSha: oldEntry.remoteSha,
+          lastSynced: oldEntry.lastSynced,
+          lastRemoteCommitTime: oldEntry.lastRemoteCommitTime,
+          size: oldEntry.size
+        });
+        newEntry.deletedLocally = false;
+        newEntry.localDeletedAt = undefined;
+      }
     });
   }
 
@@ -537,6 +541,24 @@ export default class GitlessVaultSyncPlugin extends Plugin {
     const userIgnorePatterns = this.settings.ignorePatterns ?? [];
     const ignorePatterns = [...alwaysIgnore, ...userIgnorePatterns];
     this.eventIgnoreMatcher = new IgnoreMatcher(ignorePatterns);
+  }
+
+  private async markCreated(file: TFile): Promise<void> {
+    if (!this.indexStore) {
+      return;
+    }
+    if (this.shouldIgnorePath(file.path)) {
+      return;
+    }
+
+    await this.indexStore.withIndex(async (index) => {
+      const path = normalizeVaultPath(file.path);
+      const entry = index.entries[path];
+      if (entry) {
+        entry.deletedLocally = false;
+        entry.localDeletedAt = undefined;
+      }
+    });
   }
 
   private shouldIgnorePath(path: string | null | undefined): boolean {

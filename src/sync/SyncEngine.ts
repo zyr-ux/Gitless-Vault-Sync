@@ -267,6 +267,13 @@ export class SyncEngine {
           if (target instanceof TFile) {
             await this.app.vault.delete(target);
             deletedLocal += 1;
+          } else {
+            // Handle files outside vault index (e.g. .obsidian/ or hidden files)
+            const stat = await this.app.vault.adapter.stat(path);
+            if (stat && stat.type === "file") {
+              await this.app.vault.adapter.remove(path);
+              deletedLocal += 1;
+            }
           }
           removeEntry(index, path);
         }
@@ -311,7 +318,7 @@ export class SyncEngine {
       }
 
       // Final state update to baseIndex for withIndex to save
-      Object.assign(baseIndex.entries, index.entries);
+      baseIndex.entries = { ...index.entries };
       baseIndex.lastKnownRemoteHeadSha = index.lastKnownRemoteHeadSha;
 
       return {
@@ -475,9 +482,15 @@ export class SyncEngine {
       if (!remote) {
         if (options.allowPull) {
           if (local) {
-            queueDeleteLocal(path);
+            const localChanged = local.stat.mtime > entry.localMtime;
+            if (localChanged && options.allowPush) {
+              queueUpload(local);
+            } else {
+              queueDeleteLocal(path);
+            }
+          } else {
+            removeEntry(index, path);
           }
-          removeEntry(index, path);
         }
         continue;
       }
