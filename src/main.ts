@@ -1,8 +1,8 @@
 import { Notice, Platform, Plugin, TFile } from "obsidian";
 import {
   DEFAULT_SETTINGS,
-  VaultSyncSettingTab,
-  type VaultSyncSettings
+  GitlessVaultSyncSettingTab,
+  type GitlessVaultSyncSettings
 } from "./settings";
 import { ensureEntry, normalizePluginData } from "./sync/IndexStore";
 import { GitHubApiError, GitHubClient } from "./github/GitHubClient";
@@ -16,8 +16,8 @@ const FOREGROUND_SYNC_COOLDOWN_MS = 15000;
 const MIN_SYNC_COOLDOWN_MS = 30000;
 const ABUSE_PAUSE_DURATION_MS = 15 * 60 * 1000;
 
-export default class VaultSyncPlugin extends Plugin {
-  settings!: VaultSyncSettings;
+export default class GitlessVaultSyncPlugin extends Plugin {
+  settings!: GitlessVaultSyncSettings;
   private githubClient?: GitHubClient;
   private syncEngine?: SyncEngine;
   private indexStore?: IndexStore;
@@ -37,7 +37,7 @@ export default class VaultSyncPlugin extends Plugin {
 
   async onload(): Promise<void> {
     await this.loadSettings();
-    this.addSettingTab(new VaultSyncSettingTab(this.app, this));
+    this.addSettingTab(new GitlessVaultSyncSettingTab(this.app, this));
     this.registerCommands();
     const ribbonIconEl = this.addRibbonIcon(
       "github",
@@ -265,7 +265,7 @@ export default class VaultSyncPlugin extends Plugin {
   private requestSync(showNotice = false): void {
     if (!this.isConfigured() || !this.syncEngine) {
       if (showNotice) {
-        this.showNotice("Vault Sync is not configured.", "WARNING");
+        this.showNotice("Gitless Vault Sync is not configured.", "WARNING");
       }
       return;
     }
@@ -338,7 +338,7 @@ export default class VaultSyncPlugin extends Plugin {
         await new Promise((resolve) => window.setTimeout(resolve, 400));
       }
 
-      console.error("Vault Sync error details:", error);
+      console.error("Gitless Vault Sync error details:", error);
       if (error instanceof GitHubApiError) {
         if (error.isAbuseLimit) {
           this.pausedUntil = Date.now() + ABUSE_PAUSE_DURATION_MS;
@@ -426,7 +426,7 @@ export default class VaultSyncPlugin extends Plugin {
     const notice = new Notice("Syncing notes", 0);
     const noticeEl = (notice as { noticeEl?: HTMLElement }).noticeEl;
     if (noticeEl) {
-      noticeEl.addClass("vault-sync-spinner");
+      noticeEl.addClass("gitless-vault-sync-spinner");
     }
     this.syncingNotice = notice;
   }
@@ -445,14 +445,14 @@ export default class VaultSyncPlugin extends Plugin {
 
   private registerCommands(): void {
     this.addCommand({
-      id: "vault-sync-sync-now",
+      id: "gitless-vault-sync-sync-now",
       name: "Sync now",
       callback: () => this.requestSync(true)
     });
 
     this.addCommand({
-      id: "vault-sync-open-settings",
-      name: "Open Vault Sync settings",
+      id: "gitless-vault-sync-open-settings",
+      name: "Open Gitless Vault Sync settings",
       callback: () => this.openSettings()
     });
   }
@@ -530,7 +530,7 @@ export default class VaultSyncPlugin extends Plugin {
       ".vault-sync-init",
       ".trash",
       ".DS_Store",
-      ".obsidian/plugins/vault-sync/data.json",
+      ".obsidian/plugins/gitless-vault-sync/data.json",
       ".obsidian/plugins/**/data.json"
     ];
     const userIgnorePatterns = (this.settings.ignorePatterns ?? []).filter(
@@ -561,20 +561,20 @@ export default class VaultSyncPlugin extends Plugin {
     }
 
     if (changes === 0 && result.skipped === 0) {
-      this.showNotice(`Vault Sync: No changes.`, "INFO");
+      this.showNotice(`Gitless Vault Sync: No changes.`, "INFO");
       return;
     }
 
     if (result.skipped > 0) {
       if (result.skippedFiles.length > 0) {
-        console.warn("Vault Sync skipped files:", result.skippedFiles);
+        console.warn("Gitless Vault Sync skipped files:", result.skippedFiles);
       }
       this.showNotice(
-        `Vault Sync: Sync successful (${result.skipped} files skipped).`,
+        `Gitless Vault Sync: Sync successful (${result.skipped} files skipped).`,
         severity
       );
     } else {
-      this.showNotice(`Vault Sync: Sync successful.`, severity);
+      this.showNotice(`Gitless Vault Sync: Sync successful.`, severity);
     }
   }
 

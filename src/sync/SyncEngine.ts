@@ -12,7 +12,7 @@ import {
   type SyncIndexEntry,
   type SyncIndexState
 } from "./IndexStore";
-import type { VaultSyncSettings } from "../settings";
+import type { GitlessVaultSyncSettings } from "../settings";
 import { detectDeviceName } from "../main";
 import { BlobReader, ZipReader, Uint8ArrayWriter } from "@zip.js/zip.js";
 
@@ -28,10 +28,10 @@ const ALWAYS_IGNORE = [
   ".obsidian/logs",
   ".git/**",
   ".stfolder/**",
-  ".vault-sync-init",
+  ".gitless-vault-sync-init",
   ".trash",
   ".DS_Store",
-  ".obsidian/plugins/vault-sync/data.json",
+  ".obsidian/plugins/gitless-vault-sync/data.json",
   ".obsidian/plugins/**/data.json"
 ];
 
@@ -85,13 +85,13 @@ export class SyncEngine {
   private app: App;
   private client: GitHubClient;
   private indexStore: IndexStore;
-  private settings: VaultSyncSettings;
+  private settings: GitlessVaultSyncSettings;
 
   constructor(
     app: App,
     client: GitHubClient,
     indexStore: IndexStore,
-    settings: VaultSyncSettings
+    settings: GitlessVaultSyncSettings
   ) {
     this.app = app;
     this.client = client;
@@ -99,7 +99,7 @@ export class SyncEngine {
     this.settings = settings;
   }
 
-  updateSettings(settings: VaultSyncSettings): void {
+  updateSettings(settings: GitlessVaultSyncSettings): void {
     this.settings = settings;
   }
 
@@ -110,7 +110,7 @@ export class SyncEngine {
   async hasLocalChanges(): Promise<boolean> {
     return this.indexStore.readIndex(async (index) => {
       const userIgnorePatterns = (this.settings.ignorePatterns ?? []).filter(
-        (pattern) => !isObsidianPattern(pattern)
+        (pattern: string) => !isObsidianPattern(pattern)
       );
       const ignorePatterns = [...ALWAYS_IGNORE, ...userIgnorePatterns];
       const ignore = new IgnoreMatcher(ignorePatterns);
@@ -125,7 +125,7 @@ export class SyncEngine {
     return this.indexStore.readIndex(async (baseIndex) => {
       const now = Date.now();
       const userIgnorePatterns = (this.settings.ignorePatterns ?? []).filter(
-        (pattern) => !isObsidianPattern(pattern)
+        (pattern: string) => !isObsidianPattern(pattern)
       );
       const ignorePatterns = [...ALWAYS_IGNORE, ...userIgnorePatterns];
       const ignore = new IgnoreMatcher(ignorePatterns);
@@ -159,7 +159,7 @@ export class SyncEngine {
     return this.indexStore.withIndex(async (baseIndex) => {
       const now = Date.now();
       const userIgnorePatterns = (this.settings.ignorePatterns ?? []).filter(
-        (pattern) => !isObsidianPattern(pattern)
+        (pattern: string) => !isObsidianPattern(pattern)
       );
       const ignorePatterns = [...ALWAYS_IGNORE, ...userIgnorePatterns];
       const ignore = new IgnoreMatcher(ignorePatterns);

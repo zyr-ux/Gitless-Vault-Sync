@@ -1,4 +1,4 @@
-# Contributing to Vault Sync
+# Contributing to Gitless Vault Sync
 
 Thank you for your interest in contributing! This document covers everything you need to get the project running locally, the conventions used throughout the codebase, and the process for submitting changes.
 
@@ -28,8 +28,8 @@ Thank you for your interest in contributing! This document covers everything you
 1. **Clone the repository**
 
    ```bash
-   git clone https://github.com/<your-fork>/vault-sync.git
-   cd vault-sync
+   git clone https://github.com/<your-fork>/gitless-vault-sync.git
+   cd gitless-vault-sync
    ```
 
 2. **Install dependencies**
@@ -44,10 +44,10 @@ Thank you for your interest in contributing! This document covers everything you
 
    ```bash
    # Windows (run as Administrator)
-   mklink /D "C:\path\to\vault\.obsidian\plugins\vault-sync" "C:\path\to\vault-sync"
+   mklink /D "C:\path\to\vault\.obsidian\plugins\gitless-vault-sync" "C:\path\to\gitless-vault-sync"
 
    # macOS / Linux
-   ln -s /path/to/vault-sync /path/to/vault/.obsidian/plugins/vault-sync
+   ln -s /path/to/gitless-vault-sync /path/to/vault/.obsidian/plugins/gitless-vault-sync
    ```
 
 4. **Start the dev build watcher**
@@ -180,7 +180,7 @@ The workflow then:
 1. Bumps the version in `manifest.json`, `package.json`, and `versions.json`
 2. Commits those changes back to `main`
 3. Builds the plugin
-4. Packages `Vault-Sync-v1.0.0.zip` containing the `vault-sync/` folder
+4. Packages `Gitless-Vault-Sync-v1.0.0.zip` containing the `gitless-vault-sync/` folder
 5. Creates a GitHub Release with the zip attached
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for a full breakdown of the release workflow steps.

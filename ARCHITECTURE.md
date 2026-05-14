@@ -1,4 +1,4 @@
-# Vault Sync — Architecture
+# Gitless Vault Sync — Architecture
 
 This document describes the internal architecture of the Vault Sync Obsidian plugin and the automated release workflow used to build and publish new versions.
 
@@ -9,8 +9,8 @@ This document describes the internal architecture of the Vault Sync Obsidian plu
 1. [Project Overview](#project-overview)
 2. [Repository Layout](#repository-layout)
 3. [Module Architecture](#module-architecture)
-   - [Entry Point — `VaultSyncPlugin`](#entry-point--vaultsyncplugin)
-   - [Settings — `VaultSyncSettings` & `VaultSyncSettingTab`](#settings--vaultsyncsettings--vaultsyncsettingtab)
+   - [Entry Point — `GitlessVaultSyncPlugin`](#entry-point--gitlessvaultsyncplugin)
+   - [Settings — `GitlessVaultSyncSettings` & `GitlessVaultSyncSettingTab`](#settings--gitlessvaultsyncsettings--gitlessvaultsettingtab)
    - [GitHub API Layer — `GitHubClient`](#github-api-layer--githubclient)
    - [Sync Engine — `SyncEngine`](#sync-engine--syncengine)
    - [Index Store — `IndexStore`](#index-store--indexstore)
@@ -33,14 +33,14 @@ This document describes the internal architecture of the Vault Sync Obsidian plu
 
 ## Project Overview
 
-Vault Sync is an Obsidian plugin that synchronises a vault's files with a GitHub repository using the **GitHub REST API directly** — no `git` binary, no shell, no local clone required. It works by comparing a local sync index against the remote Git tree and reconciling differences using a last-write-wins strategy.
+Gitless Vault Sync is an Obsidian plugin that synchronises a vault's files with a GitHub repository using the **GitHub REST API directly** — no `git` binary, no shell, no local clone required. It works by comparing a local sync index against the remote Git tree and reconciling differences using a last-write-wins strategy.
 
 ---
 
 ## Repository Layout
 
 ```
-Vault Sync/
+Gitless Vault Sync/
 ├── .github/
 │   └── workflows/
 │       └── release.yml         # Automated release workflow
@@ -67,7 +67,7 @@ Vault Sync/
 
 ```
 ┌─────────────────────────────────────┐
-│          VaultSyncPlugin            │  ← Obsidian Plugin lifecycle
+│       GitlessVaultSyncPlugin          │  ← Obsidian Plugin lifecycle
 │   (onload / onunload / commands)    │
 └──────┬──────────────────────────────┘
        │ owns
@@ -86,18 +86,18 @@ Vault Sync/
 
 ---
 
-### Entry Point — `VaultSyncPlugin`
+### Entry Point — `GitlessVaultSyncPlugin`
 
 **File:** `src/main.ts`
 
-`VaultSyncPlugin` extends Obsidian's `Plugin` class and acts as the top-level orchestrator. It is responsible for:
+`GitlessVaultSyncPlugin` extends Obsidian's `Plugin` class and acts as the top-level orchestrator. It is responsible for:
 
 - **Loading and saving settings** — merging persisted data with defaults via `normalizePluginData`.
 - **Device name detection** — on first load, if `deviceName` is blank, `detectDeviceName()` is called. It attempts `os.hostname()` on desktop, falls back to User-Agent parsing, and uses platform constants (`Platform.isAndroidApp`, `Platform.isIosApp`) on mobile.
 - **Instantiating subsystems** — creates `IndexStore`, `GitHubClient`, and `SyncEngine`.
 - **Registering Obsidian hooks:**
   - Ribbon icon (GitHub icon) → triggers `sync` mode.
-  - Commands: `Sync now`, `Pull from GitHub`, `Push to GitHub`, `Open Vault Sync settings`.
+  - Commands: `Sync now`, `Pull from GitHub`, `Push to GitHub`, `Open Gitless Vault Sync settings`.
   - Vault events: `modify`, `create`, `delete`, `rename` on any `TFile` → triggers debounced push.
 - **Auto-pull timer** — starts a `setInterval` that fires a pull on the configured interval (default 60 s). Restarted any time settings change.
 - **Sync-on-start** — if `syncOnStart` is enabled, queues a pull immediately after load.
@@ -119,7 +119,7 @@ requestSync(mode)
 
 ---
 
-### Settings — `VaultSyncSettings` & `VaultSyncSettingTab`
+### Settings — `GitlessVaultSyncSettings` & `GitlessVaultSyncSettingTab`
 
 **File:** `src/settings.ts`
 
@@ -217,7 +217,7 @@ Regardless of user settings, these paths are always excluded from sync:
 .obsidian/logs
 .trash
 .DS_Store
-.obsidian/plugins/vault-sync/data.json   ← prevents syncing the plugin's own state
+.obsidian/plugins/gitless-vault-sync/data.json   ← prevents syncing the plugin's own state
 ```
 
 #### Empty repository bootstrap
@@ -416,7 +416,7 @@ The `v` prefix is part of the tag name and the zip filename, but is **stripped**
 | 5 | Commit and push | Commits the three bumped files as `workflow: bumped version to 1.0.0` and force-pushes to `main` |
 | 6 | Install dependencies | `npm ci` — uses `package-lock.json` for reproducible installs |
 | 7 | Build plugin | `npm run build` → produces `main.js` in the repo root |
-| 8 | Package release zip | Creates `vault-sync/` with the four distributable files and zips it as `Vault-Sync-v1.0.0.zip` |
+| 8 | Package release zip | Creates `gitless-vault-sync/` with the four distributable files and zips it as `Gitless-Vault-Sync-v1.0.0.zip` |
 | 9 | Create GitHub Release | Uses `softprops/action-gh-release@v2` to create a release on the tag and attach the zip |
 
 ### Version Bumping Logic
@@ -435,8 +435,8 @@ The `NEW_VERSION` value is passed via the `env` block so it is safely available 
 ### Release Artifact Structure
 
 ```
-Vault-Sync-v1.0.0.zip
-└── vault-sync/
+Gitless-Vault-Sync-v1.0.0.zip
+└── gitless-vault-sync/
     ├── main.js          ← compiled plugin bundle
     ├── manifest.json    ← plugin metadata (version, id, name, minAppVersion)
     ├── styles.css       ← plugin stylesheet

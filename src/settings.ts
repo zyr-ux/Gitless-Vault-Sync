@@ -1,10 +1,10 @@
 import { App, PluginSettingTab, Setting } from "obsidian";
-import type VaultSyncPlugin from "./main";
+import type GitlessVaultSyncPlugin from "./main";
 import { detectDeviceName } from "./main";
 
 export type NoticeLevelSetting = "ALL" | "WARNING" | "ERROR";
 
-export interface VaultSyncSettings {
+export interface GitlessVaultSyncSettings {
   githubToken: string;
   repoOwner: string;
   repoName: string;
@@ -19,7 +19,7 @@ export interface VaultSyncSettings {
   autoSync: boolean;
 }
 
-export const DEFAULT_SETTINGS: VaultSyncSettings = {
+export const DEFAULT_SETTINGS: GitlessVaultSyncSettings = {
   githubToken: "",
   repoOwner: "",
   repoName: "",
@@ -42,10 +42,10 @@ export const DEFAULT_SETTINGS: VaultSyncSettings = {
   autoSync: true
 };
 
-export class VaultSyncSettingTab extends PluginSettingTab {
-  plugin: VaultSyncPlugin;
+export class GitlessVaultSyncSettingTab extends PluginSettingTab {
+  plugin: GitlessVaultSyncPlugin;
 
-  constructor(app: App, plugin: VaultSyncPlugin) {
+  constructor(app: App, plugin: GitlessVaultSyncPlugin) {
     super(app, plugin);
     this.plugin = plugin;
   }
@@ -54,7 +54,7 @@ export class VaultSyncSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
 
-    containerEl.createEl("h2", { text: "Vault Sync Settings" });
+    containerEl.createEl("h2", { text: "Gitless Vault Sync Settings" });
 
 
     new Setting(containerEl)
@@ -155,7 +155,7 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Notice level")
-      .setDesc("Choose which Vault Sync notices are shown in the UI.")
+      .setDesc("Choose which Gitless Vault Sync notices are shown in the UI.")
       .addDropdown((dropdown) => {
         dropdown
           .addOption("ALL", "ALL")
@@ -197,7 +197,7 @@ export class VaultSyncSettingTab extends PluginSettingTab {
     const footer = containerEl.createEl("p", { cls: "vault-sync-footer" });
     footer.createEl("span", { text: "To know how to set up, visit the " });
     footer.createEl("a", {
-      href: "https://github.com/zyr-ux/Vault-Sync/blob/main/README.md",
+      href: "https://github.com/zyr-ux/Gitless-Vault-Sync/blob/main/README.md",
       text: "README"
     });
     footer.createEl("span", { text: "." });

@@ -167,7 +167,7 @@ export class GitHubClient {
     const latest = await this.getLatestTree();
     if (latest.tree.truncated) {
       throw new Error(
-        "Remote tree is truncated. Vault Sync cannot safely list all files."
+        "Remote tree is truncated. Gitless Vault Sync cannot safely list all files."
       );
     }
     const files = latest.tree.tree
@@ -295,10 +295,10 @@ export class GitHubClient {
   async initializeRepository(): Promise<void> {
     await this.request(
       "PUT",
-      await this.buildPath("/contents/.vault-sync-init"),
+      await this.buildPath(`/contents/${this.addPrefix(".gitless-vault-sync-init")}`),
       {
-        message: "Initial commit by Vault Sync",
-        content: btoa("Vault Sync initialization file"),
+        message: "Initial commit by Gitless Vault Sync",
+        content: btoa("Gitless Vault Sync initialization file"),
         branch: this.branch
       }
     );

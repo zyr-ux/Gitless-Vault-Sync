@@ -28,7 +28,7 @@ For full contribution rules, conventions, and setup instructions, read **[CONTRI
 - **Do not use Node.js built-ins at runtime** (e.g. `fs`, `path`) — the only exception is `os.hostname()` in `detectDeviceName()` which is guarded by `Platform.isDesktop`.
 - **Do not bypass `IndexStore`** — all reads and writes to the sync index must go through `IndexStore.load()` and `IndexStore.save()`.
 - **Do not call the GitHub API outside `GitHubClient`** — all API interactions must go through the existing client methods or new methods added to that class.
-- **Do not remove `.obsidian/plugins/vault-sync/data.json` from the `ALWAYS_IGNORE` list** in `SyncEngine.ts` — this file must never be uploaded to GitHub.
+- **Do not remove `.obsidian/plugins/gitless-vault-sync/data.json` from the `ALWAYS_IGNORE` list** in `SyncEngine.ts` — this file must never be uploaded to GitHub.
 
 ---
 
@@ -49,7 +49,7 @@ Example: `fix: handle 409 on empty repository initialization`
 The plugin is structured as a pipeline:
 
 ```
-VaultSyncPlugin (orchestration)
+GitlessVaultSyncPlugin (orchestration)
   └── SyncEngine (three-way merge logic)
         ├── GitHubClient (REST API)
         ├── IndexStore (local sync index)

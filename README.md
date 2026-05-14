@@ -1,8 +1,8 @@
-# Vault Sync
+# Gitless Vault Sync
 
 > Sync your Obsidian vault to a GitHub repository — no Git installation required.
 
-Vault Sync is an Obsidian community plugin that syncs your vault to a private or public GitHub repository using the **GitHub REST API** directly. It works on **desktop and mobile** without needing Git, a terminal, or any external tooling.
+Gitless Vault Sync is an Obsidian community plugin that syncs your vault to a private or public GitHub repository using the **GitHub REST API** directly. It works on **desktop and mobile** without needing Git, a terminal, or any external tooling.
 
 ---
 
@@ -94,23 +94,23 @@ Vault Sync authenticates with GitHub using a **Fine-grained Personal Access Toke
 Since this plugin is not yet on the Obsidian community plugin directory, install it manually via the GitHub Releases page:
 
 1. Go to the [**Releases**](../../releases/latest) page of this repository
-2. Under the latest release, download `Vault-Sync-vX.X.X.zip`
-3. Extract the zip — you will get a folder named `vault-sync`
-4. Move the `vault-sync` folder into `.obsidian/plugins/` inside your vault
-5. In Obsidian, go to **Settings → Community plugins → Installed plugins** and enable **Vault Sync**
+2. Under the latest release, download `Gitless-Vault-Sync-vX.X.X.zip`
+3. Extract the zip — you will get a folder named `gitless-vault-sync`
+4. Move the `gitless-vault-sync` folder into `.obsidian/plugins/` inside your vault
+5. In Obsidian, go to **Settings → Community plugins → Installed plugins** and enable **Gitless Vault Sync**
 
 > [!NOTE]
 > You may need to enable **Community plugins** first under Settings → Community plugins → Turn on community plugins.
 
 **Updating to a newer version:**
 
-1. Download the new `Vault-Sync-vX.X.X.zip` from the Releases page
-2. Extract it and replace the contents of your existing `vault-sync` folder
+1. Download the new `Gitless-Vault-Sync-vX.X.X.zip` from the Releases page
+2. Extract it and replace the contents of your existing `gitless-vault-sync` folder
 3. Reload Obsidian (or disable and re-enable the plugin)
 
 ### 4. Configure the Plugin
 
-Open **Settings → Vault Sync** and fill in the following fields:
+Open **Settings → Gitless Vault Sync** and fill in the following fields:
 
 | Setting | Description |
 |---|---|
@@ -135,14 +135,14 @@ On desktop, manual syncs show a short **"Syncing notes"** spinner notice that di
 
 ### Command Palette
 
-Open the command palette (`Ctrl/Cmd + P`) and search for **Vault Sync** to access these commands:
+Open the command palette (`Ctrl/Cmd + P`) and search for **Gitless Vault Sync** to access these commands:
 
 | Command | Description |
 |---|---|
-| `Vault Sync: Sync now` | Pull remote changes and push local changes |
-| `Vault Sync: Pull from GitHub` | Pull-only — download remote changes, make no local uploads |
-| `Vault Sync: Push to GitHub` | Push-only — upload local changes, make no remote downloads |
-| `Vault Sync: Open Vault Sync settings` | Open the settings tab directly |
+| `Gitless Vault Sync: Sync now` | Pull remote changes and push local changes |
+| `Gitless Vault Sync: Pull from GitHub` | Pull-only — download remote changes, make no local uploads |
+| `Gitless Vault Sync: Push to GitHub` | Push-only — upload local changes, make no remote downloads |
+| `Gitless Vault Sync: Open Gitless Vault Sync settings` | Open the settings tab directly |
 
 ### Auto-Push on Edit
 
@@ -223,7 +223,7 @@ The following paths are always excluded from sync, regardless of settings:
 .obsidian/logs
 .trash
 .DS_Store
-.obsidian/plugins/vault-sync/data.json
+.obsidian/plugins/gitless-vault-sync/data.json
 ```
 
 > [!IMPORTANT]
