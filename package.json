@@ -1,6 +1,6 @@
 {
   "name": "gitless-vault-sync",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Obsidian plugin to sync a vault with GitHub via REST API.",
   "repository": "https://github.com/zyr-ux/Gitless-Vault-Sync",
   "main": "main.js",
