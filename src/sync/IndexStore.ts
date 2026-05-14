@@ -1,5 +1,5 @@
 import type { Plugin } from "obsidian";
-import { DEFAULT_SETTINGS, type VaultSyncSettings } from "../settings";
+import { DEFAULT_SETTINGS, type GitlessVaultSyncSettings } from "../settings";
 
 export interface SyncIndexEntry {
   path: string;
@@ -19,7 +19,7 @@ export interface SyncIndexState {
 }
 
 export interface PluginData {
-  settings: VaultSyncSettings;
+  settings: GitlessVaultSyncSettings;
   index: SyncIndexState;
 }
 
@@ -104,7 +104,7 @@ export class IndexStore {
 
 export function normalizePluginData(
   raw: unknown,
-  fallbackSettings: VaultSyncSettings
+  fallbackSettings: GitlessVaultSyncSettings
 ): PluginData {
   const record = isRecord(raw) ? raw : {};
   const hasSettings = "settings" in record;
@@ -120,7 +120,7 @@ export function normalizePluginData(
       : {}
     : {};
 
-  const settings = Object.assign({}, fallbackSettings, rawSettings) as VaultSyncSettings;
+  const settings = Object.assign({}, fallbackSettings, rawSettings) as GitlessVaultSyncSettings;
   const index = normalizeIndex(rawIndex);
 
   return { settings, index };

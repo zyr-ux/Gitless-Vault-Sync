@@ -20,20 +20,7 @@ const MAX_BLOB_BYTES = 100 * 1024 * 1024;
 const MAX_PUSH_RETRIES = 2;
 const MAX_FILE_IO_CONCURRENCY = 3;
 const HASH_THRESHOLD_BYTES = 25 * 1024 * 1024;
-const ALWAYS_IGNORE = [
-  ".obsidian/workspace",
-  ".obsidian/workspace.json",
-  ".obsidian/workspace-mobile.json",
-  ".obsidian/cache",
-  ".obsidian/logs",
-  ".git/**",
-  ".stfolder/**",
-  ".gitless-vault-sync-init",
-  ".trash",
-  ".DS_Store",
-  ".obsidian/plugins/gitless-vault-sync/data.json",
-  ".obsidian/plugins/**/data.json"
-];
+  // Moved to getAlwaysIgnore() to support dynamic configDir
 
 export interface SyncResult {
   uploaded: number;
@@ -109,11 +96,7 @@ export class SyncEngine {
 
   async hasLocalChanges(): Promise<boolean> {
     return this.indexStore.readIndex(async (index) => {
-      const userIgnorePatterns = (this.settings.ignorePatterns ?? []).filter(
-        (pattern: string) => !isObsidianPattern(pattern)
-      );
-      const ignorePatterns = [...ALWAYS_IGNORE, ...userIgnorePatterns];
-      const ignore = new IgnoreMatcher(ignorePatterns);
+      const ignore = this.getIgnoreMatcher();
       return this.detectLocalChanges(index, ignore);
     });
   }
@@ -124,11 +107,7 @@ export class SyncEngine {
   }): Promise<boolean> {
     return this.indexStore.readIndex(async (baseIndex) => {
       const now = Date.now();
-      const userIgnorePatterns = (this.settings.ignorePatterns ?? []).filter(
-        (pattern: string) => !isObsidianPattern(pattern)
-      );
-      const ignorePatterns = [...ALWAYS_IGNORE, ...userIgnorePatterns];
-      const ignore = new IgnoreMatcher(ignorePatterns);
+      const ignore = this.getIgnoreMatcher();
 
       const indexCount = Object.keys(baseIndex.entries).length;
       console.warn(
@@ -158,11 +137,7 @@ export class SyncEngine {
 
     return this.indexStore.withIndex(async (baseIndex) => {
       const now = Date.now();
-      const userIgnorePatterns = (this.settings.ignorePatterns ?? []).filter(
-        (pattern: string) => !isObsidianPattern(pattern)
-      );
-      const ignorePatterns = [...ALWAYS_IGNORE, ...userIgnorePatterns];
-      const ignore = new IgnoreMatcher(ignorePatterns);
+      const ignore = this.getIgnoreMatcher();
 
       // Short-circuit: Check head before doing anything else
       if (options.allowPull) {
@@ -219,8 +194,9 @@ export class SyncEngine {
       }
 
       // High-efficiency ZIP initial sync detection
+      const configDir = this.app.vault.configDir || ".obsidian";
       const hasUserFiles = Array.from(localFiles.keys()).some(
-        (p) => !p.startsWith(".obsidian/")
+        (p) => !p.startsWith(`${configDir}/`)
       );
 
       if (
@@ -832,7 +808,8 @@ export class SyncEngine {
       results.add(normalized);
     }
 
-    const obsidianFiles = await this.collectFilesInFolder(".obsidian");
+    const configDir = this.app.vault.configDir || ".obsidian";
+    const obsidianFiles = await this.collectFilesInFolder(configDir);
     for (const path of obsidianFiles) {
       results.add(path);
     }
@@ -1019,15 +996,35 @@ export class SyncEngine {
       }
     }
   }
+ 
+  private getIgnoreMatcher(): IgnoreMatcher {
+    const configDir = this.app.vault.configDir || ".obsidian";
+    const alwaysIgnore = [
+      `${configDir}/workspace`,
+      `${configDir}/workspace.json`,
+      `${configDir}/workspace-mobile.json`,
+      `${configDir}/cache`,
+      `${configDir}/logs`,
+      ".git/**",
+      ".stfolder/**",
+      ".gitless-vault-sync-init",
+      ".trash",
+      ".DS_Store",
+      `${configDir}/plugins/gitless-vault-sync/data.json`,
+      `${configDir}/plugins/**/data.json`
+    ];
+ 
+    const userIgnorePatterns = this.settings.ignorePatterns ?? [];
+    const ignorePatterns = [...alwaysIgnore, ...userIgnorePatterns];
+    return new IgnoreMatcher(ignorePatterns);
+  }
 }
 
 function normalizeVaultPath(path: string): string {
   return path.replace(/\\/g, "/").replace(/^\//, "");
 }
 
-function isObsidianPattern(pattern: string): boolean {
-  return normalizeVaultPath(pattern).startsWith(".obsidian/");
-}
+// isObsidianPattern removed as it's no longer needed in SyncEngine
 
 function isValidGitPath(path: string): boolean {
   if (!path) {

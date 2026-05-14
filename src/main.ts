@@ -519,24 +519,23 @@ export default class GitlessVaultSyncPlugin extends Plugin {
   }
 
   private rebuildEventIgnoreMatcher(): void {
-    const ALWAYS_IGNORE = [
-      ".obsidian/workspace",
-      ".obsidian/workspace.json",
-      ".obsidian/workspace-mobile.json",
-      ".obsidian/cache",
-      ".obsidian/logs",
+    const configDir = this.app.vault.configDir || ".obsidian";
+    const alwaysIgnore = [
+      `${configDir}/workspace`,
+      `${configDir}/workspace.json`,
+      `${configDir}/workspace-mobile.json`,
+      `${configDir}/cache`,
+      `${configDir}/logs`,
       ".git/**",
       ".stfolder/**",
       ".gitless-vault-sync-init",
       ".trash",
       ".DS_Store",
-      ".obsidian/plugins/gitless-vault-sync/data.json",
-      ".obsidian/plugins/**/data.json"
+      `${configDir}/plugins/gitless-vault-sync/data.json`,
+      `${configDir}/plugins/**/data.json`
     ];
-    const userIgnorePatterns = (this.settings.ignorePatterns ?? []).filter(
-      (pattern) => !isObsidianPattern(pattern)
-    );
-    const ignorePatterns = [...ALWAYS_IGNORE, ...userIgnorePatterns];
+    const userIgnorePatterns = this.settings.ignorePatterns ?? [];
+    const ignorePatterns = [...alwaysIgnore, ...userIgnorePatterns];
     this.eventIgnoreMatcher = new IgnoreMatcher(ignorePatterns);
   }
 
@@ -596,9 +595,7 @@ function normalizeVaultPath(path: string): string {
   return path.replace(/\\/g, "/").replace(/^\//, "");
 }
 
-function isObsidianPattern(pattern: string): boolean {
-  return normalizeVaultPath(pattern).startsWith(".obsidian/");
-}
+// isObsidianPattern removed as it's no longer needed in main.ts
 
 export function detectDeviceName(): string {
   // Mobile: use Obsidian's Platform API for reliable detection.
