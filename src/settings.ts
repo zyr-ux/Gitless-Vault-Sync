@@ -6,7 +6,7 @@ import { GitHubClient } from "./github/GitHubClient";
 export type NoticeLevelSetting = "ALL" | "WARNING" | "ERROR";
 
 export interface GitlessVaultSyncSettings {
-  githubToken: string;
+  githubTokenId: string;
   repoOwner: string;
   repoName: string;
   branch: string;
@@ -22,7 +22,7 @@ export interface GitlessVaultSyncSettings {
 }
 
 export const DEFAULT_SETTINGS: GitlessVaultSyncSettings = {
-  githubToken: "",
+  githubTokenId: "",
   repoOwner: "",
   repoName: "",
   branch: "main",
@@ -63,17 +63,47 @@ export class GitlessVaultSyncSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("GitHub token")
-      .setDesc("Personal access token with repo access.")
-      .addText((text) => {
-        text.setPlaceholder("ghp_...");
-        text.inputEl.type = "password";
-        text.inputEl.addClass("gitless-vault-sync-setting-input");
-        text.setValue(this.plugin.settings.githubToken);
-        text.onChange(async (value) => {
-          this.plugin.settings.githubToken = value.trim();
-          this.plugin.queueSaveSettings();
-          this.updateVaultLink();
-        });
+      .setDesc("Select or create a secure GitHub token from your keychain.")
+      .addExtraButton((button) => {
+        button
+          .setIcon("lucide-settings-2")
+          .setTooltip("Manage global secrets")
+          .onClick(async () => {
+            const setting = (this.app as any).setting;
+            if (setting) {
+              //console.log("Setting tabs:", setting.settingTabs);
+              //console.log("Tab IDs:", Object.keys(setting.settingTabs).map(t => setting.settingTabs[t]?.id));
+              await setting.open();
+              setting.openTabById("keychain");
+            }
+          });
+      })
+      .addDropdown((dropdown) => {
+        // We use a dropdown-like behavior for secret selection if SecretComponent is tricky,
+        // but let's try the official SecretComponent via any cast if necessary.
+        const secretStorage = (this.app as any).secretStorage;
+        if (secretStorage) {
+          const secrets = secretStorage.listSecrets() as string[];
+          if (this.plugin.settings.githubTokenId && !secrets.includes(this.plugin.settings.githubTokenId)) {
+            this.plugin.settings.githubTokenId = "";
+            this.plugin.saveSettings();
+            this.plugin.refreshSecret();
+          }
+          dropdown.addOption("", "None");
+          for (const id of secrets) {
+            dropdown.addOption(id, id);
+          }
+          dropdown.selectEl.style.width = "auto";
+          dropdown.selectEl.style.minWidth = "100px";
+          dropdown.selectEl.style.flex = "1 1 auto";
+          dropdown.setValue(this.plugin.settings.githubTokenId);
+          dropdown.onChange(async (value) => {
+            this.plugin.settings.githubTokenId = value;
+            await this.plugin.saveSettings();
+            await this.plugin.refreshSecret();
+            this.updateVaultLink();
+          });
+        }
       });
 
     new Setting(containerEl)
@@ -209,7 +239,7 @@ export class GitlessVaultSyncSettingTab extends PluginSettingTab {
       text: "README"
     });
     readmeEl.createEl("span", { text: "." });
-    
+
     this.vaultLinkEl = footer.createEl("div");
     this.updateVaultLink();
   }
@@ -220,7 +250,8 @@ export class GitlessVaultSyncSettingTab extends PluginSettingTab {
     const repo = settings.repoName;
     let owner = settings.repoOwner;
 
-    if (!repo || !settings.githubToken) {
+    const token = this.plugin.getGithubToken();
+    if (!repo || !token) {
       this.vaultLinkEl.empty();
       this.plugin.settings.lastVerifiedRepoUrl = "";
       this.plugin.queueSaveSettings();
@@ -249,7 +280,7 @@ export class GitlessVaultSyncSettingTab extends PluginSettingTab {
     this.vaultLinkEl.setText("Verifying repository...");
     try {
       const client = new GitHubClient({
-        token: settings.githubToken,
+        token: token,
         owner: owner,
         repo: repo,
         branch: settings.branch

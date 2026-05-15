@@ -18,6 +18,7 @@ const ABUSE_PAUSE_DURATION_MS = 15 * 60 * 1000;
 
 export default class GitlessVaultSyncPlugin extends Plugin {
   settings!: GitlessVaultSyncSettings;
+  private githubToken = "";
   private githubClient?: GitHubClient;
   private syncEngine?: SyncEngine;
   private indexStore?: IndexStore;
@@ -64,8 +65,24 @@ export default class GitlessVaultSyncPlugin extends Plugin {
   }
 
   async loadSettings(): Promise<void> {
-    const data = normalizePluginData(await this.loadData(), DEFAULT_SETTINGS);
+    const rawData = await this.loadData();
+    const data = normalizePluginData(rawData, DEFAULT_SETTINGS);
     this.settings = data.settings;
+
+    // Migration from plaintext settings to SecretStorage (added in Obsidian v1.11.0)
+    const legacyToken = (rawData?.settings?.githubToken) || (rawData?.githubToken);
+    if (legacyToken && typeof legacyToken === "string") {
+      const defaultSecretId = "gitless-vault-sync-token";
+      await this.saveSecretValue(defaultSecretId, legacyToken);
+      this.settings.githubTokenId = defaultSecretId;
+
+      // Clean up legacy token from data.json
+      if (rawData.settings) delete rawData.settings.githubToken;
+      delete rawData.githubToken;
+      await this.saveData(rawData);
+    }
+
+    await this.refreshSecret();
 
     if (!Array.isArray(this.settings.ignorePatterns)) {
       this.settings.ignorePatterns = DEFAULT_SETTINGS.ignorePatterns.slice();
@@ -74,6 +91,48 @@ export default class GitlessVaultSyncPlugin extends Plugin {
     if (!this.settings.deviceName.trim()) {
       this.settings.deviceName = detectDeviceName();
       await this.saveSettings();
+    }
+  }
+
+  getGithubToken(): string {
+    return this.githubToken;
+  }
+
+  async refreshSecret(): Promise<void> {
+    const id = this.settings.githubTokenId;
+    if (!id) {
+      this.githubToken = "";
+      this.applySettings();
+      return;
+    }
+
+    try {
+      const { secretStorage } = this.app as any;
+      if (secretStorage && typeof secretStorage.getSecret === "function") {
+        const val = secretStorage.getSecret(id);
+        if (val === null || val === undefined) {
+          this.settings.githubTokenId = "";
+          this.githubToken = "";
+          await this.saveSettings();
+        } else {
+          this.githubToken = val;
+        }
+      }
+    } catch (e) {
+      console.error("Gitless Vault Sync: Failed to load token from secret storage", e);
+      this.githubToken = "";
+    }
+    this.applySettings();
+  }
+
+  private async saveSecretValue(id: string, value: string): Promise<void> {
+    try {
+      const { secretStorage } = this.app as any;
+      if (secretStorage && typeof secretStorage.setSecret === "function") {
+        secretStorage.setSecret(id, value);
+      }
+    } catch (e) {
+      console.error("Gitless Vault Sync: Failed to save token to secret storage", e);
     }
   }
 
@@ -98,7 +157,7 @@ export default class GitlessVaultSyncPlugin extends Plugin {
   private initializeSync(): void {
     this.indexStore = new IndexStore(this);
     this.githubClient = new GitHubClient({
-      token: this.settings.githubToken,
+      token: this.githubToken,
       owner: this.settings.repoOwner,
       repo: this.settings.repoName,
       branch: this.settings.branch,
@@ -119,7 +178,7 @@ export default class GitlessVaultSyncPlugin extends Plugin {
     }
 
     this.githubClient.updateOptions({
-      token: this.settings.githubToken,
+      token: this.githubToken,
       owner: this.settings.repoOwner,
       repo: this.settings.repoName,
       branch: this.settings.branch,
@@ -370,7 +429,7 @@ export default class GitlessVaultSyncPlugin extends Plugin {
 
   private isConfigured(): boolean {
     return Boolean(
-      this.settings.githubToken &&
+      this.githubToken &&
       this.settings.repoName
     );
   }
