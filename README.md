@@ -45,6 +45,7 @@ Gitless Vault Sync is an Obsidian community plugin that syncs your vault to a pr
 - **Cross-platform** — tested on Windows, macOS, Linux, iOS, and Android
 - **Auto-initialize empty repos** — the plugin handles the very first commit for you
 - **Auto-detect device name** — used in commit messages so you know which device pushed
+- **Direct vault link** — quickly open your GitHub repository directly from the plugin settings
 
 ---
 
@@ -84,10 +85,10 @@ Vault Sync authenticates with GitHub using a **Fine-grained Personal Access Toke
 5. Under **Permissions → Repository permissions**, grant:
    - **Contents** → `Read and write`
    - **Metadata** → `Read-only` *(required automatically)*
-6. Click **Generate token** and **copy the token immediately** — you won't see it again
+9. Click **Generate token** and **copy the token immediately** — you won't see it again
 
-> [!CAUTION]
-> Never share your PAT. It grants write access to your repository.
+> [!TIP]
+> Vault Sync uses Obsidian's native **Secret Storage** (keychain) to keep your PAT secure. It is never stored in plaintext or synced across devices.
 
 ### 3. Install the Plugin
 
@@ -114,7 +115,7 @@ Open **Settings → Gitless Vault Sync** and fill in the following fields:
 
 | Setting | Description |
 |---|---|
-| **GitHub token** | Your fine-grained PAT (stored locally in `data.json`, never transmitted elsewhere) |
+| **GitHub token** | Select your PAT from the keychain (click the gear icon to manage secrets) |
 | **Repository owner** | Your GitHub username or organization. **Leave blank** to auto-detect from the PAT. |
 | **Repository name** | The name of your vault repository (e.g. `my-vault`) |
 | **Branch** | Branch to sync against. Defaults to `main`. |
@@ -168,13 +169,14 @@ Enable **Auto sync on startup** to automatically sync with GitHub when Obsidian 
 
 | Setting | Default | Description |
 |---|---|---|
-| **GitHub token** | *(empty)* | Fine-grained PAT with Contents read/write permission |
+| **GitHub token** | *(empty)* | Fine-grained PAT selected from the keychain |
 | **Repository owner** | *(empty)* | GitHub username/org. Auto-detected from PAT if blank. |
 | **Repository name** | *(empty)* | Name of the target GitHub repository |
 | **Branch** | `main` | Branch to sync against |
 | **Repository path prefix** | *(empty)* | Subfolder within the repo (e.g. `notes/`). Leave blank for root. |
 | **Device name** | *(auto)* | Label in commit messages. Auto-detected if blank. |
 | **Auto sync interval (sec)** | `60` | Seconds between background syncs. `0` disables polling. |
+| **Ignore patterns** | *(empty)* | Comma-separated glob patterns to exclude from sync |
 | **Notice level** | `ALL` | Controls which notices are shown: `ALL`, `WARNING`, or `ERROR` |
 | **Hide Success Message** | Off | Suppress the confirmation notice after a successful sync |
 | **Auto sync on startup** | On | Pull from remote when Obsidian starts |
@@ -229,13 +231,15 @@ The following paths are always excluded from sync (where `{configDir}` is your v
 {configDir}/plugins/**/data.json
 ```
 
-Vault Sync also supports custom **Ignore patterns** in settings. These follow `.gitignore` rules:
+Vault Sync also supports custom **Ignore patterns** in settings. These follow `.gitignore` rules and are entered as a **comma-separated list**:
 - Patterns with a slash (like `folder/file.md` or `/root.md`) are **root-relative**.
 - Simple patterns (like `node_modules` or `*.tmp`) are **basename matches** and apply anywhere in the vault.
 - `**` can be used to match multiple directory levels.
 
+Example: `node_modules/**, *.tmp, secret-folder/`
+
 > [!IMPORTANT]
-> `data.json` (the plugin's sync index and settings, including your token) is always excluded. It is **never uploaded to GitHub**.
+> `data.json` (the plugin's sync index and settings) is always excluded. Your **GitHub token** is stored securely in the Obsidian keychain and is never uploaded.
 
 Everything else under `.obsidian/` is synced by default, including themes, plugins, snippets, and configuration JSON files.
 
@@ -282,6 +286,7 @@ The key differences in Vault Sync are:
 - Supports storing the vault in a **repository subfolder**
 - Auto-detects the **repository owner** from the PAT (no need to fill it in manually)
 - Auto-initializes **empty repositories** on the first sync
+- Provides a **direct link** to your repository from the settings page
 
 ---
 

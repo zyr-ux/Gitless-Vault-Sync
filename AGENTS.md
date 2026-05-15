@@ -28,7 +28,7 @@ For full contribution rules, conventions, and setup instructions, read **[CONTRI
 - **Do not use Node.js built-ins at runtime** (e.g. `fs`, `path`) — the only exception is `os.hostname()` in `detectDeviceName()` which is guarded by `Platform.isDesktop`.
 - **Do not bypass `IndexStore`** — all reads and writes to the sync index must go through `IndexStore.load()` and `IndexStore.save()`.
 - **Do not call the GitHub API outside `GitHubClient`** — all API interactions must go through the existing client methods or new methods added to that class.
-- **Do not remove `.obsidian/plugins/gitless-vault-sync/data.json` from the `ALWAYS_IGNORE` list** in `SyncEngine.ts` — this file must never be uploaded to GitHub.
+- **Do not remove `.obsidian/plugins/gitless-vault-sync/data.json` from the `ALWAYS_IGNORE` list** in `SyncEngine.ts` — this file must never be uploaded to GitHub. (Note: The GitHub token is stored securely in the Obsidian keychain and is NOT in this file).
 
 ---
 
@@ -56,4 +56,4 @@ GitlessVaultSyncPlugin (orchestration)
         └── IgnoreMatcher (path filtering)
 ```
 
-Settings and the sync index are co-persisted in Obsidian's `data.json` under a single `{ settings, index }` envelope. See [ARCHITECTURE.md](ARCHITECTURE.md) for full details including the sync algorithm, conflict resolution rules, and the sync batching strategy.
+Settings and the sync index are co-persisted in Obsidian's `data.json` under a single `{ settings, index }` envelope (the **GitHub token** is an exception and is stored securely in the keychain). See [ARCHITECTURE.md](ARCHITECTURE.md) for full details including the sync algorithm, conflict resolution rules, and the sync batching strategy.

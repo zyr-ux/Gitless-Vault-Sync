@@ -103,6 +103,7 @@ Gitless Vault Sync/
 - **Auto sync on startup** — if `autoSync` is enabled, queues a sync immediately after load.
 - **Foreground sync** — on mobile, a sync is requested when Obsidian becomes active again (debounced) to ensure the vault is fresh.
 - **Syncing Notices** — on both desktop and mobile, a "Syncing notes" notice with a loading spinner is shown during manual syncs. Background syncs remain silent.
+- **Repository Verification & Footer** — the plugin verifies the configured repository exists via `GitHubClient.checkRepoExists()` and renders a direct link in the settings footer. Results are cached in `lastVerifiedRepoUrl`.
 
 #### Sync request queuing
 
@@ -118,7 +119,7 @@ To avoid concurrent syncs, the plugin uses a simple in-flight guard with a pendi
 
 | Field | Type | Default | Purpose |
 |---|---|---|---|
-| `githubToken` | `string` | `""` | PAT with `repo` scope |
+| `githubTokenId` | `string` | `""` | ID of the secret in Obsidian's keychain |
 | `repoOwner` | `string` | `""` | GitHub user/org; blank = auto-detect via `/user` |
 | `repoName` | `string` | `""` | Target repository name |
 | `branch` | `string` | `"main"` | Branch to sync against |
@@ -126,10 +127,11 @@ To avoid concurrent syncs, the plugin uses a simple in-flight guard with a pendi
 | `deviceName` | `string` | `""` | Used in commit messages; auto-detected if blank |
 | `debounceMs` | `number` | `3000` | Delay after last file change before auto-sync |
 | `syncIntervalSec` | `number` | `300` | Auto sync interval; `0` disables |
-| `ignorePatterns` | `string[]` | (see below) | Gitignore-style paths to exclude |
+| `ignorePatterns` | `string[]` | `[]` | User-defined glob patterns to exclude |
 | `noticeLevel` | `"ALL"\|"WARNING"\|"ERROR"` | `"ALL"` | Controls which Obsidian notices are shown |
 | `showSyncSuccessNotice` | `boolean` | `true` | Whether a success toast is shown |
 | `autoSync` | `boolean` | `true` | Enable all automatic sync triggers |
+| `lastVerifiedRepoUrl` | `string` | `""` | Cached URL of the verified repository |
 
 **Default ignore patterns:** `.obsidian/workspace`, `.obsidian/workspace.json`, `.obsidian/workspace-mobile.json`, `.obsidian/cache`, `.obsidian/logs`, `.trash`, `.DS_Store`
 
@@ -164,6 +166,7 @@ If `repoOwner` is left blank in settings, the client calls `GET /user` once and 
 | `updateBranchRef(sha)` | `PATCH /git/refs/heads/{branch}` | Fast-forward branch to new commit |
 | `createBranchRef(sha)` | `POST /git/refs` | Create branch for the first time |
 | `initializeRepository()` | `PUT /contents/.gitless-vault-sync-init` | Bootstrap an empty repo with a placeholder file |
+| `checkRepoExists()` | `GET /repos/{owner}/{repo}` | Verify repository accessibility |
 
 #### Path prefix support
 
@@ -280,7 +283,9 @@ The matcher distinguishes between **root-relative** patterns (those containing a
 ```
 onload()
   ├─ loadSettings()                    → merge data.json with DEFAULT_SETTINGS
-  │    └─ detectDeviceName()           → hostname / platform / UA fallback
+  │    ├─ detectDeviceName()           → hostname / platform / UA fallback
+  │    └─ migration: githubToken       → SecretStorage.setSecret()
+  ├─ refreshSecret()                   → fetch token from SecretStorage
   ├─ addSettingTab()
   ├─ registerCommands()
   ├─ addRibbonIcon()
