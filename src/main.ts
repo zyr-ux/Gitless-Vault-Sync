@@ -447,13 +447,13 @@ export default class GitlessVaultSyncPlugin extends Plugin {
   private registerCommands(): void {
     this.addCommand({
       id: "gitless-vault-sync-sync-now",
-      name: "Sync now",
+      name: "Sync Now",
       callback: () => this.requestSync(true)
     });
 
     this.addCommand({
       id: "gitless-vault-sync-open-settings",
-      name: "Open Gitless Vault Sync settings",
+      name: "Open Settings",
       callback: () => this.openSettings()
     });
   }
