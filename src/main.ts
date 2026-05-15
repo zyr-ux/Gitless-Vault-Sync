@@ -84,10 +84,6 @@ export default class GitlessVaultSyncPlugin extends Plugin {
 
     await this.refreshSecret();
 
-    if (!Array.isArray(this.settings.ignorePatterns)) {
-      this.settings.ignorePatterns = DEFAULT_SETTINGS.ignorePatterns.slice();
-    }
-
     if (!this.settings.deviceName.trim()) {
       this.settings.deviceName = detectDeviceName();
       await this.saveSettings();

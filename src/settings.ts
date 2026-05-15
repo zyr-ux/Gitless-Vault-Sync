@@ -30,15 +30,7 @@ export const DEFAULT_SETTINGS: GitlessVaultSyncSettings = {
   deviceName: "",
   debounceMs: 3000,
   syncIntervalSec: 300,
-  ignorePatterns: [
-    ".obsidian/workspace",
-    ".obsidian/workspace.json",
-    ".obsidian/workspace-mobile.json",
-    ".obsidian/cache",
-    ".obsidian/logs",
-    ".trash",
-    ".DS_Store"
-  ],
+  ignorePatterns: [],
   noticeLevel: "ALL",
   showSyncSuccessNotice: true,
   autoSync: true,
@@ -174,6 +166,8 @@ export class GitlessVaultSyncSettingTab extends PluginSettingTab {
       });
 
 
+
+
     new Setting(containerEl)
       .setName("Auto-sync interval (sec)")
       .setDesc("Automatically sync with remote on this interval. Set to 0 to disable.")
@@ -187,6 +181,20 @@ export class GitlessVaultSyncSettingTab extends PluginSettingTab {
           );
           this.plugin.queueSaveSettings();
         });
+      });
+
+
+    new Setting(containerEl)
+      .setName("Ignore patterns")
+      .setDesc("Custom file/folder patterns to ignore (comma-separated). Sane defaults like .obsidian/workspace and .trash are always ignored.")
+      .addText((text) => {
+        text.setPlaceholder("node_modules/**, *.tmp")
+          .setValue(serializeIgnorePatterns(this.plugin.settings.ignorePatterns))
+          .onChange(async (value) => {
+            this.plugin.settings.ignorePatterns = parseIgnorePatterns(value);
+            this.plugin.queueSaveSettings();
+          });
+        text.inputEl.addClass("gitless-vault-sync-setting-input");
       });
 
 
@@ -322,13 +330,13 @@ export class GitlessVaultSyncSettingTab extends PluginSettingTab {
 
 function parseIgnorePatterns(value: string): string[] {
   return value
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
 }
 
 function serializeIgnorePatterns(patterns: string[]): string {
-  return patterns.join("\n");
+  return patterns.join(", ");
 }
 
 function toPositiveInt(value: string, fallback: number): number {
