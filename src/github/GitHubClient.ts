@@ -305,6 +305,15 @@ export class GitHubClient {
     );
   }
 
+  async checkRepoExists(): Promise<boolean> {
+    try {
+      await this.request("GET", await this.buildPath(""));
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
   async downloadRepositoryArchive(): Promise<ArrayBuffer> {
     const owner = await this.getOwner();
     const url = `${this.apiBaseUrl}/repos/${owner}/${this.repo}/zipball/${encodeURIComponent(this.branch)}`;
@@ -346,7 +355,7 @@ export class GitHubClient {
     }
   }
 
-  private async getOwner(): Promise<string> {
+  async getOwner(): Promise<string> {
     if (this.owner) {
       return this.owner;
     }

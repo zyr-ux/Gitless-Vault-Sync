@@ -20,6 +20,11 @@ This CSS file is loaded when the plugin is enabled.
   margin-top: 20px;
   border-top: 1px solid var(--background-modifier-border);
   padding-top: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .gitless-vault-sync-spinner {

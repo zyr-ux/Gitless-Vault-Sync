@@ -1,6 +1,7 @@
 import { App, PluginSettingTab, Setting } from "obsidian";
 import type GitlessVaultSyncPlugin from "./main";
 import { detectDeviceName } from "./main";
+import { GitHubClient } from "./github/GitHubClient";
 
 export type NoticeLevelSetting = "ALL" | "WARNING" | "ERROR";
 
@@ -17,6 +18,7 @@ export interface GitlessVaultSyncSettings {
   noticeLevel: NoticeLevelSetting;
   showSyncSuccessNotice: boolean;
   autoSync: boolean;
+  lastVerifiedRepoUrl: string;
 }
 
 export const DEFAULT_SETTINGS: GitlessVaultSyncSettings = {
@@ -39,11 +41,13 @@ export const DEFAULT_SETTINGS: GitlessVaultSyncSettings = {
   ],
   noticeLevel: "ALL",
   showSyncSuccessNotice: true,
-  autoSync: true
+  autoSync: true,
+  lastVerifiedRepoUrl: ""
 };
 
 export class GitlessVaultSyncSettingTab extends PluginSettingTab {
   plugin: GitlessVaultSyncPlugin;
+  private vaultLinkEl?: HTMLElement;
 
   constructor(app: App, plugin: GitlessVaultSyncPlugin) {
     super(app, plugin);
@@ -68,6 +72,7 @@ export class GitlessVaultSyncSettingTab extends PluginSettingTab {
         text.onChange(async (value) => {
           this.plugin.settings.githubToken = value.trim();
           this.plugin.queueSaveSettings();
+          this.updateVaultLink();
         });
       });
 
@@ -81,6 +86,7 @@ export class GitlessVaultSyncSettingTab extends PluginSettingTab {
         text.onChange(async (value) => {
           this.plugin.settings.repoOwner = value.trim();
           this.plugin.queueSaveSettings();
+          this.updateVaultLink();
         });
       });
 
@@ -94,6 +100,7 @@ export class GitlessVaultSyncSettingTab extends PluginSettingTab {
         text.onChange(async (value) => {
           this.plugin.settings.repoName = value.trim();
           this.plugin.queueSaveSettings();
+          this.updateVaultLink();
         });
       });
 
@@ -194,13 +201,91 @@ export class GitlessVaultSyncSettingTab extends PluginSettingTab {
           })
       );
 
-    const footer = containerEl.createEl("p", { cls: "gitless-vault-sync-footer" });
-    footer.createEl("span", { text: "To know how to set up, visit the " });
-    footer.createEl("a", {
+    const footer = containerEl.createEl("div", { cls: "gitless-vault-sync-footer" });
+    const readmeEl = footer.createEl("span");
+    readmeEl.createEl("span", { text: "To know how to set up, visit the " });
+    readmeEl.createEl("a", {
       href: "https://github.com/zyr-ux/Gitless-Vault-Sync/blob/main/README.md",
       text: "README"
     });
-    footer.createEl("span", { text: "." });
+    readmeEl.createEl("span", { text: "." });
+    
+    this.vaultLinkEl = footer.createEl("div");
+    this.updateVaultLink();
+  }
+
+  private async updateVaultLink() {
+    if (!this.vaultLinkEl) return;
+    const { settings } = this.plugin;
+    const repo = settings.repoName;
+    let owner = settings.repoOwner;
+
+    if (!repo || !settings.githubToken) {
+      this.vaultLinkEl.empty();
+      this.plugin.settings.lastVerifiedRepoUrl = "";
+      this.plugin.queueSaveSettings();
+      return;
+    }
+
+    // Use cached URL if it matches current config
+    if (settings.lastVerifiedRepoUrl) {
+      try {
+        const url = new URL(settings.lastVerifiedRepoUrl);
+        const parts = url.pathname.split("/").filter((p) => p);
+        if (parts.length >= 2) {
+          const cachedOwner = parts[0];
+          const cachedRepo = parts[1];
+          if (cachedRepo === repo && (!owner || owner === cachedOwner)) {
+            this.renderVaultLink(settings.lastVerifiedRepoUrl);
+            return;
+          }
+        }
+      } catch (e) {
+        // Invalid URL, ignore cache
+      }
+    }
+
+    // Verify repository
+    this.vaultLinkEl.setText("Verifying repository...");
+    try {
+      const client = new GitHubClient({
+        token: settings.githubToken,
+        owner: owner,
+        repo: repo,
+        branch: settings.branch
+      });
+
+      if (!owner) {
+        owner = await client.getOwner();
+      }
+
+      const exists = await client.checkRepoExists();
+      if (exists) {
+        const url = `https://github.com/${owner}/${repo}`;
+        this.plugin.settings.lastVerifiedRepoUrl = url;
+        this.plugin.queueSaveSettings();
+        this.renderVaultLink(url);
+      } else {
+        this.vaultLinkEl.empty();
+        this.plugin.settings.lastVerifiedRepoUrl = "";
+        this.plugin.queueSaveSettings();
+      }
+    } catch (e) {
+      this.vaultLinkEl.empty();
+      this.plugin.settings.lastVerifiedRepoUrl = "";
+      this.plugin.queueSaveSettings();
+    }
+  }
+
+  private renderVaultLink(url: string) {
+    if (!this.vaultLinkEl) return;
+    this.vaultLinkEl.empty();
+    const linkContainer = this.vaultLinkEl.createEl("div");
+    linkContainer.createEl("span", { text: "Your vault repository: " });
+    linkContainer.createEl("a", {
+      href: url,
+      text: url.replace("https://github.com/", "")
+    });
   }
 }
 
